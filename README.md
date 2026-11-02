@@ -23,6 +23,7 @@ canvas my-design            # serve + open http://127.0.0.1:4747
 canvas new login 390x844    # new frame (size goes in <meta name="canvas:size">)
 canvas comments             # threads waiting on Claude (latest message sent with "Send to Claude")
 canvas comments --open      # every open thread · --all includes resolved
+canvas ds                   # list the project's components (_ds/components) with their usage
 canvas watch on|off         # should a Claude session answer comments as they arrive? (asked once per canvas)
 canvas wait                 # block until comments are sent to Claude, claim and print them (run in the background)
 canvas reply c4 "Done" --resolve
@@ -46,6 +47,32 @@ canvas resolve c4 / canvas reopen c4   # threads on other pages print as checkou
 Page menu (top left): switch pages, or open "…" on a page for Copy link to page, Rename and Delete. Rename and Delete open modals. Delete moves the folder to `.trash/`, and the first page can't be deleted. New page creates a subfolder.
 
 Moving, resizing or nudging frames doesn't save right away. The status pill at the top shows "Unsaved changes · Discard · Save" (Ctrl+S saves), then turns into the "Layout saved" toast, or a red error. Switching pages with unsaved changes shakes the pill instead. Unsaved moves are kept per page in the browser, so a reload brings them back. The app uses only its own modals, never browser dialogs. Claude's replies show as a toast in the same pill. Open viewers reload by themselves when the canvas app is updated. Zoom menu (top right): in/out, fit, selection, 50/100/200%.
+
+## Components (atomic design)
+
+Frames can be composed from reusable components instead of raw markup:
+
+```html
+<ds-index-page title="Contas a Pagar" active="Financeiro">
+  <template slot="actions"><ds-button size="sm">Adicionar</ds-button></template>
+  <ds-data-table columns="Vencimento,Fornecedor,Valor:num"><tr>…</tr></ds-data-table>
+</ds-index-page>
+```
+
+- **Where components live:** `<canvas>/_ds/components/{atoms,molecules,organisms,templates}/<name>.html`. A page's own `_ds/` is checked first, then the canvas root's.
+- **How they expand:** the server expands `<ds-name>` tags when it serves a frame, and so does `canvas shot`. The browser only sees static HTML, so comments, snapshots and live reload work as usual. Changing a component reloads every frame.
+- **Writing a component:** it's plain HTML with an optional first-line `<!-- usage -->` comment, which `canvas ds` lists. The syntax:
+
+| Syntax | Meaning |
+|---|---|
+| `{{prop}}`, `{{prop\|default}}` | An attribute value (escaped). The default also applies when the value is empty |
+| `{{?prop}}…{{/prop}}`, `{{!prop}}…{{/prop}}` | Only when the attribute is set (`?`) or not set (`!`) |
+| `{{@prop:<th>$</th>}}` | Repeat for each comma-separated item. Items may be `Label:icon` (`$`, `$2`). `{{@prop\|A,B::…}}` sets a default list. `$=active` outputs `on` for the item equal to `active` |
+| `<slot></slot>`, `<slot name="x">fallback</slot>` | The tag's children; `<template slot="x">` fills a named slot |
+
+- **Component markers:** each component's root element gets `data-ds="<level>/<name>"`. A comment inside a component records the component path, and comment mode names the component under the cursor.
+
+The tool ships no components: each project brings its own design system.
 
 ## Where canvas files live
 
