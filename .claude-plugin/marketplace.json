@@ -1,0 +1,14 @@
+{
+  "name": "local-design-canvas",
+  "description": "Offline design canvas for Claude Code: HTML frames with comment threads Claude answers",
+  "owner": {
+    "name": "David Fogelman"
+  },
+  "plugins": [
+    {
+      "name": "local-design-canvas",
+      "source": "./",
+      "description": "Offline design canvas with comment threads Claude answers"
+    }
+  ]
+}
