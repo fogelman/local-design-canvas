@@ -106,7 +106,11 @@ export function serve(dir, port) {
           const data = threadsOf(base); data.threads = data.threads.filter((t) => t.id !== m[1]); saveThreads(base, data); return json({ ok: true });
         }
         return json(updateThread(base, m[1], (t) => {
-          if (m[2] === "reply") { t.msgs.push({ by: b.by || me(), at: now(), body: b.body, ...(b.claude && { claude: true }) }); delete t.working; }
+          if (m[2] === "reply") {
+            t.msgs.push({ by: b.by || me(), at: now(), body: b.body, ...(b.claude && { claude: true }) });
+            delete t.working;
+            if (b.claude) t.status = "open"; // sent to Claude: a resolved thread reopens so Claude picks it up; plain notes leave it resolved
+          }
           if (m[2] === "status") t.status = b.status;
           if (m[2] === "move") Object.assign(t, { frame: b.frame, sel: b.sel, text: b.text, x: b.x, y: b.y, ex: b.ex, ey: b.ey });
         }));
