@@ -124,6 +124,29 @@ function updateThread(dir, id, fn) {
   return t;
 }
 
+// ---------- watching ----------
+// One non-recursive watch per directory. Node's recursive fs.watch on Linux watches each file's inode, so once a
+// file is replaced by rename (how every save here works: tmp + rename) later in-place writes to it go unseen.
+// A directory watch reports by name, whatever replaced the file. New subdirectories (pages) get a watch too.
+function watchTree(root, onChange) {
+  const watchers = new Map();
+  const skip = (name) => name.startsWith(".") || name === "node_modules";
+  const add = (dir) => {
+    if (watchers.has(dir)) return;
+    try {
+      watchers.set(dir, fs.watch(dir, (_, name) => {
+        if (!name) return;
+        const full = path.join(dir, name);
+        if (!skip(name) && !watchers.has(full) && fs.statSync(full, { throwIfNoEntry: false })?.isDirectory()) add(full);
+        onChange(path.relative(root, full));
+      }));
+      for (const d of fs.readdirSync(dir, { withFileTypes: true })) if (d.isDirectory() && !skip(d.name)) add(path.join(dir, d.name));
+    } catch {}
+  };
+  add(root);
+  return { close: () => { for (const w of watchers.values()) w.close(); watchers.clear(); } };
+}
+
 // ---------- server ----------
 const TYPES = { ".html": "text/html; charset=utf-8", ".css": "text/css", ".js": "text/javascript", ".mjs": "text/javascript", ".json": "application/json", ".svg": "image/svg+xml", ".png": "image/png", ".jpg": "image/jpeg", ".jpeg": "image/jpeg", ".gif": "image/gif", ".webp": "image/webp", ".woff2": "font/woff2", ".ico": "image/x-icon" };
 
@@ -148,8 +171,8 @@ function serve(dir, port) {
   const emit = (ev) => { for (const c of clients) c.write(`data: ${JSON.stringify(ev)}\n\n`); };
   const ownWrites = new Map(); // ignore watcher echo of our own layout saves
   let timer = null; const pending = new Set();
-  fs.watch(dir, { recursive: true }, (_, name) => {
-    if (!name || name.includes(".tmp") || name.split(path.sep).some((p) => p.startsWith(".") || p === "node_modules")) return;
+  watchTree(dir, (name) => {
+    if (!name || name.includes(".tmp") || (name !== WATCH_MARK && name.split(path.sep).some((p) => p.startsWith(".") || p === "node_modules"))) return;
     if (ownWrites.get(name) > Date.now()) return;
     pending.add(name);
     clearTimeout(timer);
@@ -175,7 +198,7 @@ function serve(dir, port) {
       }
       const page = url.searchParams.get("page") || "";
       const base = pageDir(dir, page);
-      if (p === "/_api/state") return json({ ...state(base), name: path.basename(dir), page, pages: pages(dir) });
+      if (p === "/_api/state") return json({ ...state(base), name: path.basename(dir), page, pages: pages(dir), claude: { watch: readJSON(path.join(dir, LAYOUT), {}).claudeWatch ?? null, watching: watching(dir) } });
       if (p === "/_api/pages" && req.method === "POST") {
         const { name } = await body(req);
         const all = pages(dir);
@@ -220,7 +243,7 @@ function serve(dir, port) {
           const data = threadsOf(base); data.threads = data.threads.filter((t) => t.id !== m[1]); saveThreads(base, data); return json({ ok: true });
         }
         return json(updateThread(base, m[1], (t) => {
-          if (m[2] === "reply") t.msgs.push({ by: b.by || me(), at: now(), body: b.body, ...(b.claude && { claude: true }) });
+          if (m[2] === "reply") { t.msgs.push({ by: b.by || me(), at: now(), body: b.body, ...(b.claude && { claude: true }) }); delete t.working; }
           if (m[2] === "status") t.status = b.status;
           if (m[2] === "move") Object.assign(t, { frame: b.frame, sel: b.sel, text: b.text, x: b.x, y: b.y, ex: b.ex, ey: b.ey });
         }));
@@ -265,11 +288,54 @@ ${CSS}
 </html>
 `;
 
-// A thread waits on Claude when it's open and its latest message was sent with "Send to Claude".
+// The queue. A thread waits on Claude when it's open and its latest message was sent with "Send to Claude".
+// `canvas wait` claims what it hands to a session (t.working = time); a reply clears it. A claim older than
+// CLAIM_TTL is treated as abandoned (the session died) and the thread queues again.
+const CLAIM_TTL = 30 * 60 * 1000;
 const waiting = (t) => t.status === "open" && t.msgs.at(-1)?.claude;
-function printThreads(dir, mode) {
+const claimed = (t) => !!t.working && Date.now() - Date.parse(t.working) < CLAIM_TTL;
+const allThreads = (dir) => pages(dir).flatMap((pg) => threadsOf(pageDir(dir, pg.id)).threads.map((t) => ({ ...t, page: pg.id })));
+const queued = (dir) => allThreads(dir).filter((t) => waiting(t) && !claimed(t));
+
+function claim(dir, list) {
+  const at = new Date().toISOString();
+  for (const pg of new Set(list.map((t) => t.page))) {
+    const ids = new Set(list.filter((t) => t.page === pg).map((t) => t.id));
+    const pd = pageDir(dir, pg), data = threadsOf(pd);
+    for (const t of data.threads) if (ids.has(t.id)) t.working = at;
+    saveThreads(pd, data);
+  }
+}
+
+// While `canvas wait` runs it leaves <dir>/.claude-watch ({ pid }), so the viewer can show "Claude is watching".
+const WATCH_MARK = ".claude-watch";
+function watching(dir) {
+  const mark = readJSON(path.join(dir, WATCH_MARK), null);
+  if (!mark?.pid) return false;
+  try { process.kill(mark.pid, 0); return true; } catch { return false; }
+}
+
+// Block until something is queued for Claude, let a burst of comments settle into one batch, then return it.
+// Costs nothing while idle: Claude Code runs this in the background and is woken when it exits.
+function waitForQueue(dir, settleMs, timeoutMs) {
+  return new Promise((resolve) => {
+    const now = queued(dir);
+    if (now.length) return resolve(now);
+    let settle = null, timeout = null;
+    const finish = (list) => { watcher.close(); clearTimeout(settle); clearTimeout(timeout); resolve(list); };
+    const watcher = watchTree(dir, (name) => {
+      if (!name || !name.endsWith(COMMENTS) || name.split(path.sep).some((p) => p.startsWith("."))) return;
+      if (!queued(dir).length) return;
+      clearTimeout(settle);
+      settle = setTimeout(() => finish(queued(dir)), settleMs);
+    });
+    if (timeoutMs) timeout = setTimeout(() => finish([]), timeoutMs);
+  });
+}
+
+function printThreads(dir, mode, given) {
   const keep = { all: () => true, open: (t) => t.status === "open", claude: waiting }[mode];
-  const list = pages(dir).flatMap((pg) => threadsOf(pageDir(dir, pg.id)).threads.map((t) => ({ ...t, page: pg.id }))).filter(keep);
+  const list = given || allThreads(dir).filter(keep);
   if (!list.length) return console.log({ all: "no comments", open: "no open comments", claude: "nothing waiting on Claude" }[mode]);
   const noted = new Set();
   for (const t of list) {
@@ -277,7 +343,7 @@ function printThreads(dir, mode) {
     const source = readJSON(path.join(pageDir(dir, t.page), LAYOUT), {}).source;
     if (source && !noted.has(t.page)) { noted.add(t.page); console.log(`# ${t.page || "page 1"}: ${source}`); }
     const where = [t.frame ? pre + t.frame : `${pre || "page 1 "}canvas (${t.x},${t.y})`, t.sel].filter(Boolean).join(" › ");
-    console.log(`${pre}${t.id}${mode === "all" ? ` [${t.status}]` : ""} ${where}${t.text ? ` "${t.text}"` : ""}`);
+    console.log(`${pre}${t.id}${mode === "all" ? ` [${t.status}]` : claimed(t) && !given ? " [working]" : ""} ${where}${t.text ? ` "${t.text}"` : ""}`);
     for (const m of t.msgs) console.log(`  ${m.by}${m.claude ? " @Claude" : ""}: ${m.body.replace(/\n/g, "\n    ")}`);
   }
 }
@@ -332,6 +398,8 @@ const HELP = `canvas — offline design canvas with comment threads
   canvas [dir] [--port N] [--no-open]   serve dir as a canvas (every *.html = a frame)
   canvas new <name> [WxH] [--dir d]     create <name>.html (default 1280x800; 390x844 for mobile)
   canvas comments [--open|--all] [--dir d]   threads waiting on Claude (default) · all open · everything
+  canvas watch [on|off] [--dir d]        should Claude answer comments as they arrive? (asked once per canvas)
+  canvas wait [--settle 8] [--timeout s] [--dir d]   block until comments are queued for Claude, claim and print them
   canvas reply <id> <text> [--resolve] [--by name] [--dir d]
   canvas shot <frame|id> [--out f.png] [--scale 2] [--dir d]   PNG of one frame (or a thread's frame)
   canvas resolve <id> [--dir d]         mark thread resolved
@@ -362,13 +430,34 @@ else if (cmd === "new") {
   console.log(file);
 } else if (cmd === "comments") {
   printThreads(dirOf(dirFlag), flag(args, "--all") ? "all" : flag(args, "--open") ? "open" : "claude");
+} else if (cmd === "watch") {
+  // per-canvas preference: should a Claude session keep `canvas wait` running and answer comments as they arrive?
+  const dir = dirOf(dirFlag), file = path.join(dir, LAYOUT), layout = readJSON(file, { frames: {} });
+  if (args[1] === "on" || args[1] === "off") { layout.claudeWatch = args[1] === "on"; writeJSON(file, layout); }
+  else if (args[1]) { console.error("usage: canvas watch [on|off] [--dir d]"); process.exit(1); }
+  console.log(layout.claudeWatch === undefined ? "unset" : layout.claudeWatch ? "on" : "off");
+} else if (cmd === "wait") {
+  const dir = dirOf(dirFlag);
+  const mark = path.join(dir, WATCH_MARK);
+  writeJSON(mark, { pid: process.pid, since: new Date().toISOString() });
+  const unmark = () => { try { if (readJSON(mark, {}).pid === process.pid) fs.unlinkSync(mark); } catch {} };
+  process.on("exit", unmark);
+  for (const sig of ["SIGINT", "SIGTERM", "SIGHUP"]) process.on(sig, () => process.exit(130));
+  const settle = +(flag(args, "--settle") || 8) * 1000, timeout = +(flag(args, "--timeout") || 0) * 1000;
+  const list = await waitForQueue(dir, settle, timeout);
+  if (!list.length) { console.log("no comments (timed out)"); process.exit(2); }
+  claim(dir, list);
+  printThreads(dir, "claude", list);
+  const shown = path.relative(process.cwd(), dir) || ".";
+  const where = shown.startsWith("..") ? dir : shown; // relative only when it stays inside the cwd
+  console.log(`\n${list.length} thread(s) claimed. Answer each with \`canvas reply <id> "…" [--resolve] --dir ${where}\`, then run \`canvas wait --dir ${where}\` again.`);
 } else if (cmd === "reply") {
   const resolve = flag(args, "--resolve");
   const by = flag(args, "--by");
   const [, id, ...text] = args;
   if (!id || !text.length) { console.error("usage: canvas reply <id> <text> [--resolve]"); process.exit(1); }
   const [pd, tid] = splitId(dirOf(dirFlag), id);
-  updateThread(pd, tid, (t) => { t.msgs.push({ by: by || "Claude", at: now(), body: text.join(" ") }); if (resolve) t.status = "resolved"; });
+  updateThread(pd, tid, (t) => { t.msgs.push({ by: by || "Claude", at: now(), body: text.join(" ") }); delete t.working; if (resolve) t.status = "resolved"; });
   console.log(`${id} replied${resolve ? " + resolved" : ""}`);
 } else if (cmd === "shot") {
   const out = flag(args, "--out"), scale = flag(args, "--scale") || 1;

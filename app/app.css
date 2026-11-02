@@ -210,3 +210,14 @@ body.far .frame .label, body.far .section .ss { display: none; }
 body.farther .section { display: none; }
 .frame .label .title { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
 .frame .label a, .frame .label .play { flex: none; }
+
+/* Claude queue states */
+#pop .qstate { display: flex; align-items: center; gap: 6px; padding: 6px 12px; color: #6fb1ff; font-size: 12px; border-top: 1px solid var(--line); }
+#pop .qstate svg { width: 13px; height: 13px; }
+.spin { animation: q-spin 1s linear infinite; }
+@keyframes q-spin { to { transform: rotate(360deg); } }
+.mention.working { border-color: #6fb1ff; }
+#claudeState { display: inline-flex; align-items: center; gap: 5px; color: var(--mid); font-size: 11px; white-space: nowrap; }
+#claudeState::before { content: ""; width: 6px; height: 6px; border-radius: 3px; background: var(--dim); }
+#claudeState.on { color: #6fb1ff; }
+#claudeState.on::before { background: #6fb1ff; box-shadow: 0 0 0 3px rgba(111, 177, 255, .2); }

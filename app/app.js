@@ -25,21 +25,31 @@ async function loadState() {
   const pg = PAGES.find((x) => x.id === PAGE) || PAGES[0];
   document.title = `${pg.name} · ${s.name}`;
   $("#pageName").textContent = pg.name;
+  CLAUDE = s.claude || CLAUDE;
   renderSections(s.sections);
   renderFrames(s.frames);
   for (const [file, d] of dirty) { const f = frames.get(file); if (!f) dirty.delete(file); else markDirty(f, d); } // drop stale or already-saved entries
   syncBar();
   setThreads(s.threads);
 }
-async function loadThreads() { setThreads((await api("/_api/state")).threads); }
-let seenClaude = null; // message counts by Claude per thread, to toast new replies
+async function loadThreads() { const s = await api("/_api/state"); CLAUDE = s.claude || CLAUDE; setThreads(s.threads); }
+// Queue state of a thread for Claude: "queued" (sent, not picked up), "working" (claimed by `canvas wait`), or null.
+// Mirrors bin/canvas.mjs: a claim older than 30 min counts as abandoned, so the thread is queued again.
+const queueState = (t) => t.status === "open" && t.msgs.at(-1)?.claude
+  ? (t.working && Date.now() - Date.parse(t.working) < 30 * 60 * 1000 ? "working" : "queued") : null;
+const QUEUE_LABEL = { queued: "Queued for Claude", working: "Claude is working…" };
+let CLAUDE = { watch: null, watching: false }; // the canvas's watch preference + whether a `canvas wait` is running
+let seenClaude = null, seenWorking = null; // to toast new replies and new pick-ups
 function setThreads(list) {
   const counts = new Map(list.map((t) => [t.id, t.msgs.filter((m) => m.by === "Claude").length]));
+  const working = new Set(list.filter((t) => queueState(t) === "working").map((t) => t.id));
   if (seenClaude) {
     const fresh = list.filter((t) => counts.get(t.id) > (seenClaude.get(t.id) || 0));
+    const picked = [...working].filter((id) => !seenWorking.has(id));
     if (fresh.length) Pill.toast(fresh.length === 1 ? `Claude replied on #${num(fresh[0])}` : `Claude replied on ${fresh.length} threads`);
+    else if (picked.length) Pill.toast(picked.length === 1 ? `Claude picked up #${String(picked[0]).replace(/^c/, "")}` : `Claude picked up ${picked.length} comments`);
   }
-  seenClaude = counts;
+  seenClaude = counts; seenWorking = working;
   threads = list;
   if (openThread && !threads.find((t) => t.id === openThread)) openThread = null;
   renderPins(); renderPanel(); renderPop();
@@ -371,6 +381,7 @@ function renderPop() {
       <button data-act="delete" title="Delete thread"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg></button>`}
       <button data-act="close" title="Close (Esc)"><svg viewBox="0 0 24 24"><path d="M6 6l12 12M18 6L6 18"/></svg></button></header>
     ${t.msgs.length ? `<div class="msgs">${t.msgs.map((m) => `<div class="msg"><div class="by">${esc(m.by)}<span class="at">${esc(m.at)}</span></div><div class="body">${m.claude ? `<span class="mention">@Claude</span> ` : ""}${esc(m.body)}</div></div>`).join("")}</div>` : ""}
+    ${!t.draft && queueState(t) ? `<div class="qstate ${queueState(t)}">${queueState(t) === "working" ? `<svg class="spin" viewBox="0 0 24 24"><path d="M21 12a9 9 0 11-6.2-8.6"/></svg>` : ""}${QUEUE_LABEL[queueState(t)]}</div>` : ""}
     <form class="${toClaude ? "to-claude" : ""}"><div class="chip"><span class="mention">@Claude</span></div>
       <textarea rows="1" placeholder="${t.draft ? "Add a comment" : "Reply"}"></textarea>
       <div class="send"><label class="ck"><input type="checkbox" ${toClaude ? "checked" : ""}><span class="box"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>Send to Claude</label>
@@ -459,11 +470,15 @@ function renderPanel() {
   $("#openCount").textContent = open || "";
   document.body.classList.toggle("hide-resolved", $("#panel").hidden || panelFilter !== "resolved");
   if ($("#panel").hidden) return;
+  const live = CLAUDE.watching || threads.some((t) => queueState(t) === "working");
+  $("#claudeState").className = live ? "on" : "";
+  $("#claudeState").textContent = live ? "Claude is watching" : "Claude answers when asked";
+  $("#claudeState").title = live ? "A Claude session is picking up comments sent to Claude as they arrive" : "Comments sent to Claude wait until you ask a Claude session to answer them (or enable watching: canvas watch on)";
   const list = threads.filter((t) => (panelFilter === "resolved") === (t.status === "resolved")).reverse();
   $("#plist").innerHTML = list.length ? list.map((t) => `<div class="pitem${openThread === t.id ? " on" : ""}" data-id="${t.id}">
       <div class="where">#${num(t)} · ${esc([t.frame && frames.get(t.frame)?.title || t.frame, t.text && `“${t.text}”`].filter(Boolean).join(" › ") || "Canvas")}</div>
       <div class="first"><b>${esc(t.msgs[0]?.by)}</b> ${esc(t.msgs[0]?.body)}</div>
-      ${t.status === "open" && t.msgs.at(-1)?.claude ? `<div class="n"><span class="mention">Waiting on Claude</span></div>` : ""}
+      ${queueState(t) ? `<div class="n"><span class="mention ${queueState(t)}">${QUEUE_LABEL[queueState(t)]}</span></div>` : ""}
       ${t.msgs.length > 1 ? `<div class="n">${t.msgs.length - 1} repl${t.msgs.length > 2 ? "ies" : "y"} · last ${esc(t.msgs.at(-1).by)}</div>` : ""}</div>`).join("")
     : `<div class="empty">No ${panelFilter} comments</div>`;
 }
@@ -790,7 +805,7 @@ function connect() {
     const files = all.filter(mine).map((f) => (PAGE ? f.slice(PAGE.length + 1) : f));
     if (all.some((f) => !mine(f) && /(\.html|canvas\.json)$/.test(f)) || files.some((f) => f.includes("/") && /(\.html|canvas\.json)$/.test(f))) refreshPages();
     const top = files.filter((f) => !f.includes("/"));
-    if (top.includes("comments.json")) await loadThreads();
+    if (top.includes("comments.json") || top.includes(".claude-watch")) await loadThreads();
     const html = top.filter((f) => f.endsWith(".html"));
     if (html.length || top.includes("canvas.json")) await loadState();
     for (const f of html) if (frames.has(f)) reloadFrame(frames.get(f));
