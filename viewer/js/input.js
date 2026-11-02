@@ -84,6 +84,7 @@ addEventListener("keydown", (e) => {
   else if (k === "c") setTool("comment");
   else if (k === "i") setTool("interact");
   else if (k === "p") present();
+  else if (k === "r" && (stale.size || staleApp)) applyStale();
   else if (k === "+" || k === "=") zoomAt(pan.k * 1.25);
   else if (k === "-") zoomAt(pan.k / 1.25);
   else if (k === "escape") { if (![...document.querySelectorAll(".menu")].every((m) => m.hidden)) closeMenus(); else if (draft || openThread) closePop(); else if (tool !== "move") setTool("move"); else select(null); }
@@ -104,7 +105,10 @@ function connect() {
   es.onerror = () => ($("#status").textContent = "disconnected — is `canvas` still running?");
   es.onmessage = async (m) => {
     const ev = JSON.parse(m.data);
-    if (ev.type === "app") return location.reload(); // the canvas app itself was updated (unsaved moves survive: they're stored)
+    if (ev.type === "app") { // the canvas app itself was updated (unsaved moves survive: they're stored)
+      if (busy()) { staleApp = true; return renderStale(); }
+      return location.reload();
+    }
     const all = ev.files;
     const pageIds = new Set(PAGES.map((x) => x.id).filter(Boolean));
     const mine = (f) => PAGE ? f.startsWith(`${PAGE}/`) : !pageIds.has(f.split("/")[0]);
@@ -114,8 +118,8 @@ function connect() {
     if (top.includes("comments.json")) await loadThreads();
     const html = top.filter((f) => f.endsWith(".html"));
     if (html.length || top.includes("canvas.json")) await loadState();
-    for (const f of html) if (frames.has(f)) reloadFrame(frames.get(f));
+    for (const f of html) if (frames.has(f)) requestReload(frames.get(f));
     // shared assets (css, js, images, nested files) can affect every frame
-    if (files.some((f) => !f.endsWith(".json") && !(f.endsWith(".html") && !f.includes("/")))) for (const f of frames.values()) reloadFrame(f);
+    if (files.some((f) => !f.endsWith(".json") && !(f.endsWith(".html") && !f.includes("/")))) for (const f of frames.values()) requestReload(f);
   };
 }
