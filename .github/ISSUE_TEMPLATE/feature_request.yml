@@ -1,0 +1,20 @@
+name: Feature request
+description: An idea to make the canvas better
+labels: [enhancement]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the situation and what's hard today.
+    validations:
+      required: true
+  - type: textarea
+    id: idea
+    attributes:
+      label: What would help?
+      description: Your idea, if you have one. Sketches and screenshots are welcome.
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Anything you've tried instead?

@@ -1,0 +1,29 @@
+{
+  "name": "Helpdesk",
+  "frames": {
+    "inbox.html": {
+      "x": 0,
+      "y": 0
+    },
+    "ticket.html": {
+      "x": 1400,
+      "y": 0
+    },
+    "new-ticket.html": {
+      "x": 0,
+      "y": 940
+    },
+    "inbox-mobile.html": {
+      "x": 1400,
+      "y": 940
+    }
+  },
+  "sections": [
+    {
+      "title": "Helpdesk \u00b7 example canvas",
+      "sub": "Desktop and mobile screens composed from the components in _ds/",
+      "x": 0,
+      "y": -110
+    }
+  ]
+}

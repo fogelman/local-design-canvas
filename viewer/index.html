@@ -4,7 +4,7 @@
 <meta charset="utf-8">
 <title>Canvas</title>
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<link rel="stylesheet" href="/_app/app.css">
+<link rel="stylesheet" href="/_app/viewer.css">
 </head>
 <body>
 <div id="view">
@@ -58,7 +58,13 @@
 
 <div id="status"></div>
 <div id="pop" hidden></div>
-<script src="/_app/pill.js"></script>
-<script src="/_app/app.js"></script>
+<!-- classic scripts sharing one global scope; order matters, main.js boots last -->
+<script src="/_app/js/pill.js"></script>
+<script src="/_app/js/core.js"></script>
+<script src="/_app/js/frames.js"></script>
+<script src="/_app/js/comments.js"></script>
+<script src="/_app/js/ui.js"></script>
+<script src="/_app/js/input.js"></script>
+<script src="/_app/js/main.js"></script>
 </body>
 </html>

@@ -6,4 +6,4 @@ while [ -h "$f" ]; do
   d=$(dirname "$f"); f=$(readlink "$f")
   case "$f" in /*) ;; *) f="$d/$f" ;; esac
 done
-exec node "$(dirname "$f")/../lib/canvas.mjs" "$@"
+exec node "$(dirname "$f")/../src/cli.mjs" "$@"

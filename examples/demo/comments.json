@@ -1,0 +1,23 @@
+{
+  "threads": [
+    {
+      "id": "c1", "frame": "inbox.html", "sel": "main.page > div.row > h1", "text": "Inbox", "x": 60, "y": 90, "ex": 0.95, "ey": 0.3, "status": "resolved",
+      "msgs": [
+        { "by": "Alex", "at": "2026-11-02 10:12", "body": "Can we show how many tickets are unread next to the title?", "claude": true },
+        { "by": "Claude", "at": "2026-11-02 10:13", "body": "Added a \"7 unread\" badge next to the title, using the open status colour." }
+      ]
+    },
+    {
+      "id": "c2", "frame": "ticket.html", "sel": "main.page > div.row:nth-of-type(2) > button.btn:nth-of-type(2)", "text": "Reply", "x": 1180, "y": 130, "ex": 0.85, "ey": 0.2, "status": "open",
+      "msgs": [
+        { "by": "Alex", "at": "2026-11-02 10:20", "body": "Reply should be the only primary button. Move Assign into a … menu.", "claude": true }
+      ]
+    },
+    {
+      "id": "c3", "frame": "inbox-mobile.html", "sel": "main.page > div.stats", "text": "Open 24", "x": 200, "y": 110, "ex": 0.9, "ey": 0.2, "status": "open",
+      "msgs": [
+        { "by": "Jo", "at": "2026-11-02 10:31", "body": "Let's review the mobile stats with support on Friday." }
+      ]
+    }
+  ]
+}

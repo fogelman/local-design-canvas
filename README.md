@@ -1,148 +1,129 @@
 # Local Design Canvas
 
-An offline design canvas with Figma-style comment threads. It has no dependencies and needs only Node 20 or newer.
+**An offline design canvas for [Claude Code](https://claude.com/claude-code).** Every HTML file in a folder becomes a live screen on a pan-and-zoom canvas. You pin comments on any element, tick **Send to Claude**, and Claude edits the screen and replies in the thread.
 
-A canvas is just a folder:
+![The canvas: desktop and mobile screens with comment pins](assets/canvas.png)
 
-```
-my-design/
-  login.html        # every top-level *.html file is a live frame
-  home.html
-  styles.css        # optional shared styles (a change reloads every frame)
-  _ds/ds.css        # optional design system the project installs; `canvas new` links it
-  canvas.json       # frame positions (written by the viewer)
-  comments.json     # threads (written by the viewer and the CLI)
-  checkout/         # each subfolder with html (or a canvas.json) is another page,
-    cart.html       #   with its own canvas.json + comments.json
-```
+- **Your files, offline.** Screens are plain HTML in your repo. No account, no cloud, no build step, no dependencies.
+- **Built for Claude.** Claude reads a compact list of open comments, edits only the file each one points to, and answers in the thread. It can also watch the canvas and answer as comments arrive.
+- **Reusable components.** Compose screens from your own atoms, molecules, organisms and templates (`<ds-button>`, `<ds-data-table>`…), so every screen stays short and consistent.
+- **Any screen size.** Desktop, tablet and mobile screens sit side by side.
 
-## Use
+## Quick start
 
-```bash
-canvas my-design            # serve + open http://127.0.0.1:4747
-canvas new login 390x844    # new frame (size goes in <meta name="canvas:size">)
-canvas comments             # threads waiting on Claude (latest message sent with "Send to Claude")
-canvas comments --open      # every open thread · --all includes resolved
-canvas ds                   # list the project's components (_ds/components) with their usage
-canvas watch on|off         # should a Claude session answer comments as they arrive? (asked once per canvas)
-canvas wait                 # block until comments are sent to Claude, claim and print them (run in the background)
-canvas reply c4 "Done" --resolve
-canvas shot c4              # PNG of a thread's frame (or `canvas shot login`), via headless Chrome
-canvas resolve c4 / canvas reopen c4   # threads on other pages print as checkout/c2
-```
+You need Node 20 or newer.
 
-## Viewer
-
-| Key | Action |
-|---|---|
-| V | Move: drag frames, resize from the corner handle, nudge with the arrow keys, double-click to zoom |
-| H / hold Space / middle mouse | Pan |
-| C | Comment: click any element in a frame, or empty canvas |
-| I | Interact: use the live page (click, scroll, type) |
-| Wheel / Ctrl+wheel (pinch) | Pan / zoom |
-| Shift+1 · Shift+0 · Shift+2 | Fit all · 100% · zoom to the selected frame |
-| P | Present: full-screen frames in reading order, ← → to step through, Esc to exit |
-| Esc | Close the menu or thread, then go back to Move |
-
-Page menu (top left): switch pages, or open "…" on a page for Copy link to page, Rename and Delete. Rename and Delete open modals. Delete moves the folder to `.trash/`, and the first page can't be deleted. New page creates a subfolder.
-
-Moving, resizing or nudging frames doesn't save right away. The status pill at the top shows "Unsaved changes · Discard · Save" (Ctrl+S saves), then turns into the "Layout saved" toast, or a red error. Switching pages with unsaved changes shakes the pill instead. Unsaved moves are kept per page in the browser, so a reload brings them back. The app uses only its own modals, never browser dialogs. Claude's replies show as a toast in the same pill. Open viewers reload by themselves when the canvas app is updated. Zoom menu (top right): in/out, fit, selection, 50/100/200%.
-
-## Components (atomic design)
-
-Frames can be composed from reusable components instead of raw markup:
-
-```html
-<ds-index-page title="Contas a Pagar" active="Financeiro">
-  <template slot="actions"><ds-button size="sm">Adicionar</ds-button></template>
-  <ds-data-table columns="Vencimento,Fornecedor,Valor:num"><tr>…</tr></ds-data-table>
-</ds-index-page>
-```
-
-- **Where components live:** `<canvas>/_ds/components/{atoms,molecules,organisms,templates}/<name>.html`. A page's own `_ds/` is checked first, then the canvas root's.
-- **How they expand:** the server expands `<ds-name>` tags when it serves a frame, and so does `canvas shot`. The browser only sees static HTML, so comments, snapshots and live reload work as usual. Changing a component reloads every frame.
-- **Writing a component:** it's plain HTML with an optional first-line `<!-- usage -->` comment, which `canvas ds` lists. The syntax:
-
-| Syntax | Meaning |
-|---|---|
-| `{{prop}}`, `{{prop\|default}}` | An attribute value (escaped). The default also applies when the value is empty |
-| `{{?prop}}…{{/prop}}`, `{{!prop}}…{{/prop}}` | Only when the attribute is set (`?`) or not set (`!`) |
-| `{{@prop:<th>$</th>}}` | Repeat for each comma-separated item. Items may be `Label:icon` (`$`, `$2`). `{{@prop\|A,B::…}}` sets a default list. `$=active` outputs `on` for the item equal to `active` |
-| `<slot></slot>`, `<slot name="x">fallback</slot>` | The tag's children; `<template slot="x">` fills a named slot |
-
-- **Component markers:** each component's root element gets `data-ds="<level>/<name>"`. A comment inside a component records the component path, and comment mode names the component under the cursor.
-
-The tool ships no components: each project brings its own design system.
-
-## Where canvas files live
-
-The canvas tool is only the server, the viewer and the CLI. A canvas is a folder that belongs to the project you design in: its frames, `canvas.json`, `comments.json` and `_ds/` live in that project's repo, and the project (and the Claude session working in it) is responsible for them. The tool never ships or knows any project's files.
-
-## Generated canvases
-
-A build script can write a canvas instead of a person or Claude. Its `canvas.json` can carry:
-- `"sections": [{ "title", "sub", "x", "y" }]`: group titles drawn on the canvas. `(x, y)` is the bottom-left of the title, so leave about 110 units above the row's frames for their names. Below 20% zoom the frame names hide and section titles stay at least 14px on screen.
-- `"source": "…"`: a note saying where the frames come from. `canvas comments` prints it above that page's threads, so Claude changes the source rather than the generated html. Comments on such pages aren't written into the files, since a rebuild would wipe them. They anchor by selector instead.
-
-
-## Performance
-
-Frames are virtualized. Only frames near the viewport get a live iframe, capped at 12 and nearest first (override with `?live=N`). Frames that leave the view unload after 2.5 s and restore their scroll when they come back. Every other frame shows a static snapshot: its DOM and CSS serialized into an SVG image, painted cheaply at any zoom. One hidden iframe works through a queue to create missing snapshots and refresh stale ones, so the zoomed-out overview stays complete. Snapshots don't load external images or web fonts, so treat them as previews.
-
-**Queue.** A thread sent to Claude shows as *Queued for Claude*. When a Claude session watching the canvas picks it up with `canvas wait`, it shows as *Claude is working…*, and Claude's reply clears it. Watching is optional and set per canvas (`canvas watch on|off`); the skill asks once. It's event-driven: a background `canvas wait` costs nothing until a comment arrives and batches a burst of comments into one handoff. A claim older than 30 minutes (for example, the session died) goes back to *Queued*.
-
-Each message has a **Send to Claude** checkbox, shown as an `@Claude` chip, and the choice is remembered. Unchecked messages are notes between people. A thread enters Claude's queue when its latest message is sent to Claude, and leaves it when Claude replies. The panel tags those threads "Waiting on Claude".
-
-When you comment on an element, the canvas writes `data-cid="<thread id>"` onto it in the frame's source, so the pin survives edits and Claude can find it with one grep. If the page's DOM no longer mirrors the source (for example, when JS generated the element), the comment falls back to a CSS selector plus an offset inside that element, so pins follow the element when the layout changes. If the selector stops matching, the pin falls back to the saved frame coordinates. Resolved threads are hidden unless the panel's Resolved tab is open.
-
-## Claude
-
-The canvas skill (`skills/canvas/SKILL.md`, from the plugin or your linked working copy) lets any project can ask Claude to "answer the canvas comments". Claude runs `canvas comments`, edits only the frame each thread names, and replies with `canvas reply <id> "…" --resolve`. The viewer updates live.
-
-## Install
-
-Needs Node 20 or newer. There are no dependencies to install.
-
-### As a Claude Code plugin (recommended for users)
+**As a Claude Code plugin** (the canvas skill, the `canvas` command for Claude, and a start-of-session hook):
 
 ```
 /plugin install local-design-canvas --marketplace fogelman/local-design-canvas
 ```
 
-On older Claude Code, use two steps: `/plugin marketplace add fogelman/local-design-canvas`, then `/plugin install local-design-canvas@local-design-canvas`. The repo is private, so it clones with your git credentials (for example after `gh auth setup-git`).
+On older Claude Code, use two steps: `/plugin marketplace add fogelman/local-design-canvas`, then `/plugin install local-design-canvas@local-design-canvas`.
 
-The plugin adds:
-- **the `canvas` command** to Claude's shell
-- **the canvas skill**
-- **a start-of-session hook:** if a canvas in the project has comments waiting for Claude, or has watching on, the session hears about it right away
-
-The plugin's `canvas` is only on Claude's PATH. To run it yourself in a terminal, also do the CLI install below.
-
-### CLI only, or developing the tool
-
-Point your PATH and Claude at your working copy, so edits are live:
+**Or as a command-line tool:**
 
 ```bash
-git clone git@github.com:fogelman/local-design-canvas.git && cd local-design-canvas
-npm link                                          # `canvas` in your terminal (lib/canvas.mjs)
-ln -s "$PWD/skills/canvas" ~/.claude/skills/canvas  # the skill, from your working copy
+git clone https://github.com/fogelman/local-design-canvas && cd local-design-canvas
+npm link
+canvas examples/demo        # opens the example canvas in your browser
 ```
 
-Don't also install the plugin, or the skill loads twice. For the session hook in this setup, add it to `~/.claude/settings.json` yourself, as a `SessionStart` command hook running `canvas hook session-start`.
+Then, in a Claude Code session inside your project:
 
-`canvas shot` needs Chrome or Chromium. It looks for `google-chrome`, `chromium` and a Playwright download; set `CANVAS_CHROME=/path/to/chrome` to pick one.
+> Design the checkout screens on a canvas in docs/checkout/canvas
 
-### Layout
+## How it works with Claude
 
-| Path | What it is |
+![A comment sent to Claude, queued in the comments panel](assets/comments.png)
+
+1. Press **C** and click any element of a screen. Write your comment and keep **Send to Claude** checked. Unchecked comments are notes between people; Claude ignores them.
+2. Claude runs `canvas comments` and gets a few lines per thread: the file, the exact element and your message.
+3. Claude edits that one file. The screen reloads in your browser, keeping your scroll position and anything you're typing.
+4. Claude replies in the thread and resolves it, or asks you a question.
+
+![Claude's reply in the thread](assets/claude-reply.png)
+
+**Watch mode (optional).** The first time a session opens a canvas, Claude asks whether to answer comments automatically. If you say yes, it waits in the background at no cost and picks up comments as you send them, a few seconds after the last one. Threads show **Queued for Claude**, then **Claude is working…**, then the reply.
+
+## Components
+
+Build screens from your design system instead of raw markup. Components live in your canvas at `_ds/components/{atoms,molecules,organisms,templates}/`:
+
+```html
+<ds-topbar active="Inbox"><ds-button href="new-ticket.html">New ticket</ds-button></ds-topbar>
+<ds-ticket-row subject="Can't reset my password" status="urgent" label="Urgent"></ds-ticket-row>
+```
+
+The server expands them when it serves a screen, so the browser, comments and screenshots see plain HTML. In comment mode, the outline names the component under your cursor, and a comment records which component it's in. Claude can then fix the component once, or just that one use.
+
+![Comment mode names the component under the cursor](assets/components.png)
+
+A component is a small HTML file:
+
+| Syntax | Meaning |
 |---|---|
-| `lib/canvas.mjs` | The CLI and server: the real entry point (npm `bin`) |
-| `bin/canvas` | Shell wrapper. Plugins put `bin/` on Claude's PATH, so the file name is the command |
-| `app/` | The viewer |
-| `skills/canvas/SKILL.md` | The skill |
-| `hooks/hooks.json` | The plugin's SessionStart hook |
-| `.claude-plugin/` | Plugin manifest, plus a marketplace manifest so the repo installs as its own marketplace |
+| `{{label}}`, `{{label\|default}}` | An attribute's value |
+| `{{?href}}…{{/href}}`, `{{!href}}…{{/href}}` | Only when the attribute is set (`?`) or not set (`!`) |
+| `{{@items:<li>$</li>}}` | Repeat for each comma-separated item. `Label:icon` items give `$` and `$2`; `$=active` marks the current item; `{{@items\|A,B::…}}` sets a default |
+| `<slot></slot>`, `<slot name="actions">` | The tag's children, or the content of `<template slot="actions">` |
 
-## References
+Start the file with a one-line `<!-- usage -->` comment, so `canvas ds` can list it. The tool ships no design system; [`examples/demo/_ds`](examples/demo/_ds) shows a small one.
 
-What the design is modelled on (Claude Design, Figma) is recorded in [docs/references.md](docs/references.md).
+## Commands
+
+| Command | What it does |
+|---|---|
+| `canvas [dir]` | Serve a folder as a canvas and open it in the browser |
+| `canvas new <name> [WxH]` | Create a screen (for example `canvas new inbox-mobile 390x844`) |
+| `canvas comments [--open\|--all]` | Threads waiting for Claude (default), all open threads, or everything |
+| `canvas reply <id> "text" [--resolve]` | Answer a thread |
+| `canvas resolve <id>` · `canvas reopen <id>` | Close or reopen a thread |
+| `canvas watch on\|off` | Should Claude answer comments as they arrive? |
+| `canvas wait` | Wait until comments are sent to Claude, then print them (Claude runs this in the background) |
+| `canvas ds` | List the canvas's components |
+| `canvas shot <screen or thread>` | Save a PNG of a screen, using headless Chrome |
+
+Add `--dir <canvas>` when you're not inside the canvas folder.
+
+## In the browser
+
+| Key | Action |
+|---|---|
+| V | Move and resize screens. Changes wait in a **Save / Discard** bar (Ctrl+S saves) |
+| H, or hold Space | Pan |
+| C | Comment on any element |
+| I | Use the live screen: click, type, scroll. Links to other screens fly you there |
+| P | Present full screen. ← → steps through screens and follows links between them |
+| Scroll · Ctrl+scroll | Pan · zoom |
+| Shift+1 · Shift+0 · Shift+2 | Fit everything · 100% · the selected screen |
+
+Pages are subfolders: use the page menu at the top left to switch, add, rename or delete them.
+
+## A canvas folder
+
+```
+docs/checkout/canvas/        # lives in your project's repo
+  cart.html                  # one HTML file per screen
+  payment.html               # set its size with <meta name="canvas:size" content="390x844">
+  _ds/                       # optional design system: ds.css + components/
+  canvas.json                # screen positions and section titles (written by the viewer)
+  comments.json              # comment threads
+  mobile/                    # a subfolder is another page
+```
+
+The canvas tool is only the server, the viewer and the command line. The files belong to your project, and git tracks them like any other file.
+
+**Generated screens.** A build script can write the screens instead, for example from specs. If its `canvas.json` has a `"source"` note, Claude changes that source and rebuilds instead of editing the generated HTML.
+
+## Performance
+
+Only the screens near your view run as live pages, at most 12. The rest show a lightweight snapshot, or diagonal stripes until they've loaded. After 15 seconds in a hidden tab, the canvas releases everything and reloads what's in view when you come back. Hundreds of screens on one page stay smooth.
+
+## Contributing
+
+Bug reports, ideas and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## License
+
+[MIT](LICENSE). Built with [Claude Code](https://claude.com/claude-code).
