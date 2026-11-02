@@ -106,7 +106,11 @@ export function serve(dir, port) {
           const data = threadsOf(base); data.threads = data.threads.filter((t) => t.id !== m[1]); saveThreads(base, data); return json({ ok: true });
         }
         return json(updateThread(base, m[1], (t) => {
-          if (m[2] === "reply") { t.msgs.push({ by: b.by || me(), at: now(), body: b.body, ...(b.claude && { claude: true }) }); delete t.working; }
+          if (m[2] === "reply") {
+            t.msgs.push({ by: b.by || me(), at: now(), body: b.body, ...(b.claude && { claude: true }) });
+            delete t.working;
+            t.status = "open"; // replying reopens a resolved thread (and, if sent to Claude, puts it back in Claude's queue)
+          }
           if (m[2] === "status") t.status = b.status;
           if (m[2] === "move") Object.assign(t, { frame: b.frame, sel: b.sel, text: b.text, x: b.x, y: b.y, ex: b.ex, ey: b.ey });
         }));
@@ -114,7 +118,7 @@ export function serve(dir, port) {
       if (p === "/_api/me") return json({ name: me() });
       // project files
       const file = path.join(dir, path.normalize(p).replace(/^(\.\.[/\\])+/, ""));
-      if (!file.startsWith(dir)) { res.writeHead(403); return res.end(); }
+      if (file !== dir && !file.startsWith(dir + path.sep)) { res.writeHead(403); return res.end(); } // inside the canvas only
       if (file.endsWith(".html") && !file.split(path.sep).includes("_ds") && fs.existsSync(file)) {
         res.writeHead(200, { "content-type": TYPES[".html"], "cache-control": "no-store" });
         return res.end(expandFile(file, dir));
