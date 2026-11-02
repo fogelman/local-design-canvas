@@ -1,0 +1,57 @@
+name: CI
+
+on:
+  push:
+    branches: [master, develop]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: Tests · Node ${{ matrix.node }} · ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest]
+        node: [20, 22, 24]
+        include:
+          - os: macos-latest
+            node: 22
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node }}
+      - name: Unit and integration tests (syntax checks included)
+        run: npm test
+
+  e2e:
+    name: Browser tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Playwright (test-only; the project has no dependencies)
+        run: npm install --no-save playwright && npx playwright install --with-deps chromium
+      - name: Browser tests
+        run: npm run test:e2e
+
+  plugin:
+    name: Plugin manifest
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: claude plugin validate
+        run: npx --yes @anthropic-ai/claude-code plugin validate .

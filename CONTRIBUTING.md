@@ -73,19 +73,22 @@ Keep these in mind when proposing changes:
 
 ## Testing your change
 
-There's no automated test suite yet; contributions toward one are welcome. Before opening a pull request:
+```bash
+npm test             # unit + integration tests and a syntax check of every script (no install needed)
+npm run test:e2e     # browser tests of the viewer (needs Playwright, see below)
+```
 
-1. Run `node --check` on every file you touched, and `claude plugin validate .` if you changed the plugin files.
-2. Run `canvas examples/demo` and try what you changed in the browser. Also check the main loop:
-   - add a comment with **Send to Claude**, and see that `canvas comments` lists it
-   - reply with `canvas reply`, and see that the viewer updates live
-   - move a screen, then save and discard
-   - switch pages
-3. If you changed the server or CLI, try `canvas wait --timeout 2`, `canvas ds` and `canvas shot inbox --dir examples/demo`.
-4. If you changed how something looks, put before and after screenshots in the pull request.
+- **Unit tests** (`tests/unit/`): component expansion, threads and the Claude queue, element anchors, pages and path safety, the session hook, the plugin files.
+- **Integration tests** (`tests/integration/`): the real `canvas` command against a temporary canvas, and the real server (API, component expansion, path safety, live-reload events).
+- **Browser tests** (`tests/e2e/`): the viewer running on a copy of `examples/demo`. They skip themselves unless Playwright is available. To run them, use `npm install --no-save playwright && npx playwright install chromium`, or point `CANVAS_PLAYWRIGHT` at an existing playwright install (and `CANVAS_CHROME` at a browser).
+
+CI runs all of it on every pull request: Node 20, 22 and 24 on Linux, Node 22 on macOS, the browser tests, and `claude plugin validate`.
+
+Add a test with your change: a unit test for logic, an integration test for commands and the server, and a browser test for viewer behaviour. If you changed how something looks, also put before and after screenshots in the pull request.
 
 ## Pull requests
 
+- Branch from **`develop`** and open your pull request against `develop`. `master` holds releases; `develop` is merged into it when a version ships. Both are protected: changes land through pull requests, and CI must pass.
 - One topic per pull request, with a clear description of what changed and why.
 - Match the existing style: two-space indentation, double quotes, small functions, comments that explain why rather than what.
 - Update the README, the skill (`skills/canvas/SKILL.md`) or `canvas --help` when behaviour changes.
