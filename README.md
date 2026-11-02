@@ -23,6 +23,8 @@ canvas my-design            # serve + open http://127.0.0.1:4747
 canvas new login 390x844    # new frame (size goes in <meta name="canvas:size">)
 canvas comments             # threads waiting on Claude (latest message sent with "Send to Claude")
 canvas comments --open      # every open thread · --all includes resolved
+canvas watch on|off         # should a Claude session answer comments as they arrive? (asked once per canvas)
+canvas wait                 # block until comments are sent to Claude, claim and print them (run in the background)
 canvas reply c4 "Done" --resolve
 canvas shot c4              # PNG of a thread's frame (or `canvas shot login`), via headless Chrome
 canvas resolve c4 / canvas reopen c4   # threads on other pages print as checkout/c2
@@ -59,6 +61,8 @@ A build script can write a canvas instead of a person or Claude. Its `canvas.jso
 ## Performance
 
 Frames are virtualized. Only frames near the viewport get a live iframe, capped at 12 and nearest first (override with `?live=N`). Frames that leave the view unload after 2.5 s and restore their scroll when they come back. Every other frame shows a static snapshot: its DOM and CSS serialized into an SVG image, painted cheaply at any zoom. One hidden iframe works through a queue to create missing snapshots and refresh stale ones, so the zoomed-out overview stays complete. Snapshots don't load external images or web fonts, so treat them as previews.
+
+**Queue.** A thread sent to Claude shows as *Queued for Claude*. When a Claude session watching the canvas picks it up with `canvas wait`, it shows as *Claude is working…*, and Claude's reply clears it. Watching is optional and set per canvas (`canvas watch on|off`); the skill asks once. It's event-driven: a background `canvas wait` costs nothing until a comment arrives and batches a burst of comments into one handoff. The comments panel shows whether Claude is watching. A claim older than 30 minutes (for example, the session died) goes back to *Queued*. While a wait runs, it leaves `.claude-watch` in the canvas folder; add that to the project's `.gitignore`.
 
 Each message has a **Send to Claude** checkbox, shown as an `@Claude` chip, and the choice is remembered. Unchecked messages are notes between people. A thread enters Claude's queue when its latest message is sent to Claude, and leaves it when Claude replies. The panel tags those threads "Waiting on Claude".
 
