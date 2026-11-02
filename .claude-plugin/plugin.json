@@ -1,0 +1,9 @@
+{
+  "name": "local-design-canvas",
+  "version": "0.2.0",
+  "description": "Offline design canvas: every HTML file in a folder is a live frame, with Figma-style comment threads that Claude reads, answers and can watch",
+  "author": { "name": "David Fogelman" },
+  "repository": "https://github.com/fogelman/local-design-canvas",
+  "license": "MIT",
+  "keywords": ["design", "canvas", "prototype", "comments", "offline"]
+}

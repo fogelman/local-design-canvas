@@ -1,0 +1,9 @@
+#!/bin/sh
+# Plugin entry: Claude Code puts a plugin's bin/ on the Bash PATH, and the file name is the command.
+# Resolves symlinks so it also works when linked elsewhere, then runs the real CLI with Node.
+f="$0"
+while [ -h "$f" ]; do
+  d=$(dirname "$f"); f=$(readlink "$f")
+  case "$f" in /*) ;; *) f="$d/$f" ;; esac
+done
+exec node "$(dirname "$f")/../lib/canvas.mjs" "$@"

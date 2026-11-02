@@ -1,10 +1,10 @@
 {
   "name": "local-design-canvas",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "description": "Offline design canvas: every HTML file in a folder is a live frame, with Figma-style comment threads that Claude Code can read and answer",
   "type": "module",
-  "bin": { "canvas": "bin/canvas.mjs" },
-  "files": ["bin", "app", "skill", "README.md", "LICENSE"],
+  "bin": { "canvas": "lib/canvas.mjs" },
+  "files": ["lib", "bin", "app", "skills", "hooks", ".claude-plugin", "README.md", "LICENSE"],
   "engines": { "node": ">=20" },
   "license": "MIT",
   "keywords": ["design", "canvas", "prototype", "comments", "claude", "offline"]

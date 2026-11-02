@@ -34,7 +34,7 @@ async function loadState() {
 }
 async function loadThreads() { const s = await api("/_api/state"); CLAUDE = s.claude || CLAUDE; setThreads(s.threads); }
 // Queue state of a thread for Claude: "queued" (sent, not picked up), "working" (claimed by `canvas wait`), or null.
-// Mirrors bin/canvas.mjs: a claim older than 30 min counts as abandoned, so the thread is queued again.
+// Mirrors lib/canvas.mjs: a claim older than 30 min counts as abandoned, so the thread is queued again.
 const queueState = (t) => t.status === "open" && t.msgs.at(-1)?.claude
   ? (t.working && Date.now() - Date.parse(t.working) < 30 * 60 * 1000 ? "working" : "queued") : null;
 const QUEUE_LABEL = { queued: "Queued for Claude", working: "Claude is working…" };

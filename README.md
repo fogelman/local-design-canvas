@@ -97,19 +97,51 @@ When you comment on an element, the canvas writes `data-cid="<thread id>"` onto 
 
 ## Claude
 
-`skill/SKILL.md` is symlinked to `~/.claude/skills/canvas`, so any project can ask Claude to "answer the canvas comments". Claude runs `canvas comments`, edits only the frame each thread names, and replies with `canvas reply <id> "…" --resolve`. The viewer updates live.
+The canvas skill (`skills/canvas/SKILL.md`, from the plugin or your linked working copy) lets any project can ask Claude to "answer the canvas comments". Claude runs `canvas comments`, edits only the frame each thread names, and replies with `canvas reply <id> "…" --resolve`. The viewer updates live.
 
 ## Install
 
 Needs Node 20 or newer. There are no dependencies to install.
 
-```bash
-git clone <this repo> canvas && cd canvas
-npm link                                  # puts `canvas` on your PATH (or: npm i -g .)
-ln -s "$PWD/skill" ~/.claude/skills/canvas  # optional: teaches Claude Code the comment loop
+### As a Claude Code plugin (recommended for users)
+
+```
+/plugin install local-design-canvas --marketplace fogelman/local-design-canvas
 ```
 
+On older Claude Code, use two steps: `/plugin marketplace add fogelman/local-design-canvas`, then `/plugin install local-design-canvas@local-design-canvas`. The repo is private, so it clones with your git credentials (for example after `gh auth setup-git`).
+
+The plugin adds:
+- **the `canvas` command** to Claude's shell
+- **the canvas skill**
+- **a start-of-session hook:** if a canvas in the project has comments waiting for Claude, or has watching on, the session hears about it right away
+
+The plugin's `canvas` is only on Claude's PATH. To run it yourself in a terminal, also do the CLI install below.
+
+### CLI only, or developing the tool
+
+Point your PATH and Claude at your working copy, so edits are live:
+
+```bash
+git clone git@github.com:fogelman/local-design-canvas.git && cd local-design-canvas
+npm link                                          # `canvas` in your terminal (lib/canvas.mjs)
+ln -s "$PWD/skills/canvas" ~/.claude/skills/canvas  # the skill, from your working copy
+```
+
+Don't also install the plugin, or the skill loads twice. For the session hook in this setup, add it to `~/.claude/settings.json` yourself, as a `SessionStart` command hook running `canvas hook session-start`.
+
 `canvas shot` needs Chrome or Chromium. It looks for `google-chrome`, `chromium` and a Playwright download; set `CANVAS_CHROME=/path/to/chrome` to pick one.
+
+### Layout
+
+| Path | What it is |
+|---|---|
+| `lib/canvas.mjs` | The CLI and server: the real entry point (npm `bin`) |
+| `bin/canvas` | Shell wrapper. Plugins put `bin/` on Claude's PATH, so the file name is the command |
+| `app/` | The viewer |
+| `skills/canvas/SKILL.md` | The skill |
+| `hooks/hooks.json` | The plugin's SessionStart hook |
+| `.claude-plugin/` | Plugin manifest, plus a marketplace manifest so the repo installs as its own marketplace |
 
 ## References
 
