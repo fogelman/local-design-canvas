@@ -14,6 +14,7 @@ The look and the comment workflow follow Claude Design, Anthropic's design tool 
 | Artboards linking to each other, with ▷ Play per artboard | `frameForHref`, the label's play button and present mode in `app/app.js` |
 | A shared design-system stylesheet across artboards | Convention: a project may install `_ds/ds.css` in its canvas, and `canvas new` links it |
 | Export artboard | `canvas shot <frame or thread>` |
+| Design-system components (`psd-badge`, `data-slot`, component markers) | Atomic components expanded by the server from the project's `_ds/components/` (`expandComponents` in `bin/canvas.mjs`); roots marked `data-ds`, so comments name their component |
 | Unloaded artboards drawn as diagonal stripes | `.ph` stripes in `app/app.css` |
 
 **Deliberately different:**

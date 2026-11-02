@@ -221,3 +221,5 @@ body.farther .section { display: none; }
 #claudeState::before { content: ""; width: 6px; height: 6px; border-radius: 3px; background: var(--dim); }
 #claudeState.on { color: #6fb1ff; }
 #claudeState.on::before { background: #6fb1ff; box-shadow: 0 0 0 3px rgba(111, 177, 255, .2); }
+/* comment mode: name the component under the cursor */
+#hover[data-ds]:not([data-ds=""])::after { content: attr(data-ds); position: absolute; left: 0; bottom: 100%; margin-bottom: calc(3px * var(--inv)); transform: scale(var(--inv)); transform-origin: 0 100%; background: var(--accent); color: #fff; font: 500 11px/16px system-ui; padding: 0 5px; border-radius: 3px; white-space: nowrap; }

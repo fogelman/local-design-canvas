@@ -313,6 +313,16 @@ function cssPath(el, doc) {
 }
 const labelOf = (el) => (el.getAttribute("aria-label") || el.getAttribute("placeholder") || el.getAttribute("alt") || el.innerText || el.value || "").trim().replace(/\s+/g, " ").slice(0, 60);
 
+// the components an element sits in, outermost first, with which use of the innermost it is: "templates/app-shell › organisms/sidebar#1"
+function dsPath(el, doc) {
+  const chain = [];
+  for (let n = el.closest("[data-ds]"); n; n = n.parentElement?.closest("[data-ds]")) chain.unshift(n);
+  if (!chain.length) return null;
+  const inner = chain.at(-1), id = inner.dataset.ds;
+  const nth = [...doc.querySelectorAll(`[data-ds="${CSS.escape(id)}"]`)].indexOf(inner) + 1;
+  return chain.map((n) => n.dataset.ds).join(" › ") + `#${nth}`;
+}
+
 function frameAt(sx, sy) {
   const el = document.elementsFromPoint(sx, sy).find((n) => n.classList?.contains("frame"));
   return el ? frames.get(el.dataset.file) : null;
@@ -339,6 +349,8 @@ function anchorAt(sx, sy) {
       // lets the server tag this element in the source with data-cid (a stable anchor), see tagElement()
       anchor: cid ? { cid } : { tag: el.localName, tagIndex: [...same].indexOf(el), tagCount: same.length },
     });
+    const ds = dsPath(el, doc);
+    if (ds) a.ds = ds;
   }
   return a;
 }
@@ -735,6 +747,7 @@ view.addEventListener("pointermove", (e) => {
   if (!el || el === docOf(f).body) return hoverEl.classList.remove("on");
   const r = el.getBoundingClientRect();
   Object.assign(hoverEl.style, { left: `${f.x + r.left}px`, top: `${f.y + r.top}px`, width: `${r.width}px`, height: `${r.height}px`, outlineWidth: `${1.5 / pan.k}px` });
+  hoverEl.dataset.ds = el.closest("[data-ds]")?.dataset.ds || "";
   hoverEl.classList.add("on");
 });
 view.addEventListener("pointerup", () => {
