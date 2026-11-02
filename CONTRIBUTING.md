@@ -82,13 +82,13 @@ npm run test:e2e     # browser tests of the viewer (needs Playwright, see below)
 - **Integration tests** (`tests/integration/`): the real `canvas` command against a temporary canvas, and the real server (API, component expansion, path safety, live-reload events).
 - **Browser tests** (`tests/e2e/`): the viewer running on a copy of `examples/demo`. They skip themselves unless Playwright is available. To run them, use `npm install --no-save playwright && npx playwright install chromium`, or point `CANVAS_PLAYWRIGHT` at an existing playwright install (and `CANVAS_CHROME` at a browser).
 
-CI runs all of it on every pull request: Node 20, 22 and 24 on Linux, Node 22 on macOS, the browser tests, and `claude plugin validate`.
+CI runs all of it on pull requests into `master` (releases): Node 20, 22 and 24 on Linux, Node 22 on macOS, the browser tests, and `claude plugin validate`. Run `npm test` yourself before opening a pull request into `develop`.
 
 Add a test with your change: a unit test for logic, an integration test for commands and the server, and a browser test for viewer behaviour. If you changed how something looks, also put before and after screenshots in the pull request.
 
 ## Pull requests
 
-- Branch from **`develop`** and open your pull request against `develop`. `master` holds releases; `develop` is merged into it when a version ships. Both are protected: changes land through pull requests, and CI must pass.
+- Branch from **`develop`** and open your pull request against `develop`. `master` holds releases; `develop` is merged into it when a version ships. Both are protected: changes land through pull requests. CI runs on pull requests into `master`.
 - One topic per pull request, with a clear description of what changed and why.
 - Match the existing style: two-space indentation, double quotes, small functions, comments that explain why rather than what.
 - Update the README, the skill (`skills/canvas/SKILL.md`) or `canvas --help` when behaviour changes.
