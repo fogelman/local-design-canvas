@@ -97,8 +97,11 @@ Add `--dir <canvas>` when you're not inside the canvas folder.
 | P | Present full screen. ← → steps through screens and follows links between them |
 | Scroll · Ctrl+scroll | Pan · zoom |
 | Shift+1 · Shift+0 · Shift+2 | Fit everything · 100% · the selected screen |
+| R | Apply waiting updates (see below) |
 
 Pages are subfolders: use the page menu at the top left to switch, add, rename or delete them.
+
+**Updates never interrupt you.** When Claude changes a screen, it reloads right away, unless you're writing a comment or using a screen in interact mode. Then the screen gets an amber mark, and an amber **Reload** button appears at the top right. Click it, or press R, when you're ready.
 
 ## A canvas folder
 
@@ -126,4 +129,4 @@ Bug reports, ideas and pull requests are welcome. See [CONTRIBUTING.md](CONTRIBU
 
 ## License
 
-[MIT](LICENSE). Built with [Claude Code](https://claude.com/claude-code).
+[MIT](LICENSE).

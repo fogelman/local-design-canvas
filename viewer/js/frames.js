@@ -163,6 +163,7 @@ function mount(f) {
 }
 function unmount(f, keepSnapshot = true) {
   if (!f.iframe) return;
+  if (stale.delete(f.file)) { f.el.classList.remove("stale"); renderStale(); } // it loads fresh when it comes back
   try { const w = f.iframe.contentWindow; if (w.scrollX || w.scrollY) f.scroll = { x: w.scrollX, y: w.scrollY }; } catch {}
   clearTimeout(f.snapT);
   if (keepSnapshot) snap(f, docOf(f));
@@ -222,6 +223,35 @@ function onFrameLoad(f) {
   f.snapT = setTimeout(() => f.iframe && snap(f, docOf(f)), 400);
   renderPins();
 }
+// ---------- stale screens: don't reload under the person's hands ----------
+// While someone is writing a comment or using a live screen (interact mode), changes from disk don't reload the
+// screens they're looking at. Those screens get an amber mark, and an amber Reload button in the right menu
+// (or R) applies everything when they choose. Off-view screens, comments and layout still update on their own.
+const stale = new Set();
+let staleApp = false; // the viewer itself was updated: a full page reload is waiting
+function busy() {
+  const ta = pop.hidden ? null : pop.querySelector("textarea");
+  return !!draft || !!(ta && ta.value.trim()) || tool === "interact";
+}
+function requestReload(f) {
+  if (f.iframe && busy()) { stale.add(f.file); f.el.classList.add("stale"); return renderStale(); }
+  reloadFrame(f);
+}
+function applyStale() {
+  if (staleApp) return location.reload();
+  for (const file of stale) { const f = frames.get(file); if (f) { f.el.classList.remove("stale"); reloadFrame(f); } }
+  stale.clear();
+  renderStale();
+}
+function renderStale() {
+  const n = stale.size, btn = $("#staleBtn");
+  btn.hidden = !n && !staleApp;
+  $("#staleCount").textContent = staleApp ? "" : n > 1 ? n : "";
+  btn.title = staleApp ? "The canvas was updated. Reload the page when you're ready (R)"
+    : `${n} screen${n === 1 ? "" : "s"} changed on disk. Reload when you're ready (R)`;
+}
+$("#staleBtn").addEventListener("click", applyStale);
+
 function reloadFrame(f) {
   if (!f.iframe) { f.snapStale = true; return queueSnaps(); } // unloaded frames load fresh when they come back
   try { const w = f.iframe.contentWindow; f.scroll = { x: w.scrollX, y: w.scrollY }; w.location.reload(); } catch { f.iframe.src = f.iframe.src; }
