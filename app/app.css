@@ -87,7 +87,8 @@ body.hide-resolved .pin.resolved { display: none; }
 
 /* comments panel */
 #panel { position: fixed; top: 54px; right: 10px; bottom: 10px; width: 320px; background: var(--pill); border: 1px solid var(--pill-line); border-radius: 12px; box-shadow: var(--shadow); display: flex; flex-direction: column; overflow: hidden; z-index: 4; }
-#panel header { display: flex; align-items: center; gap: 8px; padding: 10px 10px 10px 14px; border-bottom: 1px solid var(--line); }
+#panel header { display: flex; align-items: center; gap: 8px; padding: 10px 10px 10px 14px; border-bottom: 1px solid var(--line); min-width: 0; }
+#panel header .ptabs { flex: none; }
 .grow { flex: 1; }
 .ptabs { display: flex; gap: 2px; background: #1e1e1e; border-radius: 7px; padding: 2px; }
 .ptabs button { padding: 3px 9px; border-radius: 5px; color: var(--mid); font-size: 12px; }
@@ -217,9 +218,5 @@ body.farther .section { display: none; }
 .spin { animation: q-spin 1s linear infinite; }
 @keyframes q-spin { to { transform: rotate(360deg); } }
 .mention.working { border-color: #6fb1ff; }
-#claudeState { display: inline-flex; align-items: center; gap: 5px; color: var(--mid); font-size: 11px; white-space: nowrap; }
-#claudeState::before { content: ""; width: 6px; height: 6px; border-radius: 3px; background: var(--dim); }
-#claudeState.on { color: #6fb1ff; }
-#claudeState.on::before { background: #6fb1ff; box-shadow: 0 0 0 3px rgba(111, 177, 255, .2); }
 /* comment mode: name the component under the cursor */
 #hover[data-ds]:not([data-ds=""])::after { content: attr(data-ds); position: absolute; left: 0; bottom: 100%; margin-bottom: calc(3px * var(--inv)); transform: scale(var(--inv)); transform-origin: 0 100%; background: var(--accent); color: #fff; font: 500 11px/16px system-ui; padding: 0 5px; border-radius: 3px; white-space: nowrap; }

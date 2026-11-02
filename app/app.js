@@ -25,20 +25,18 @@ async function loadState() {
   const pg = PAGES.find((x) => x.id === PAGE) || PAGES[0];
   document.title = `${pg.name} · ${s.name}`;
   $("#pageName").textContent = pg.name;
-  CLAUDE = s.claude || CLAUDE;
   renderSections(s.sections);
   renderFrames(s.frames);
   for (const [file, d] of dirty) { const f = frames.get(file); if (!f) dirty.delete(file); else markDirty(f, d); } // drop stale or already-saved entries
   syncBar();
   setThreads(s.threads);
 }
-async function loadThreads() { const s = await api("/_api/state"); CLAUDE = s.claude || CLAUDE; setThreads(s.threads); }
+async function loadThreads() { setThreads((await api("/_api/state")).threads); }
 // Queue state of a thread for Claude: "queued" (sent, not picked up), "working" (claimed by `canvas wait`), or null.
 // Mirrors lib/canvas.mjs: a claim older than 30 min counts as abandoned, so the thread is queued again.
 const queueState = (t) => t.status === "open" && t.msgs.at(-1)?.claude
   ? (t.working && Date.now() - Date.parse(t.working) < 30 * 60 * 1000 ? "working" : "queued") : null;
 const QUEUE_LABEL = { queued: "Queued for Claude", working: "Claude is working…" };
-let CLAUDE = { watch: null, watching: false }; // the canvas's watch preference + whether a `canvas wait` is running
 let seenClaude = null, seenWorking = null; // to toast new replies and new pick-ups
 function setThreads(list) {
   const counts = new Map(list.map((t) => [t.id, t.msgs.filter((m) => m.by === "Claude").length]));
@@ -150,7 +148,7 @@ function snap(f, doc) {
 // one hidden iframe at a time renders frames that have no (or a stale) snapshot
 let snapping = false;
 function queueSnaps() {
-  if (snapping) return;
+  if (snapping || released || document.hidden) return; // no background work in a hidden tab
   const a = toWorld(innerWidth / 2, innerHeight / 2);
   const next = [...frames.values()].filter((f) => !f.iframe && (!f.snapUrl || f.snapStale))
     .sort((p, q) => Math.hypot(p.x - a.x, p.y - a.y) - Math.hypot(q.x - a.x, q.y - a.y))[0];
@@ -209,6 +207,33 @@ function discardLayout() {
 const dirtyKey = () => `canvas-dirty:${NAME}/${PAGE}`;
 function storeDirty() { dirty.size ? localStorage.setItem(dirtyKey(), JSON.stringify([...dirty])) : localStorage.removeItem(dirtyKey()); }
 
+// ---------- release when hidden ----------
+// A canvas tab left hidden (another tab, minimized) for RELEASE_MS gives everything back: live frames close,
+// snapshot images are dropped (frames show the stripes) and the snapshot queue stops. Coming back loads only what's
+// in view again; snapshots refill from the viewport outwards. An unfocused but visible window is left alone.
+const RELEASE_MS = 15000;
+let released = false, releaseT = null;
+function releaseAll() {
+  released = true;
+  clearTimeout(cullT);
+  document.querySelector(".snapper")?.remove();
+  for (const f of frames.values()) {
+    unmount(f, false);
+    if (f.snapUrl) { URL.revokeObjectURL(f.snapUrl); f.snapUrl = null; }
+    const ph = f.el.querySelector(".ph");
+    ph.innerHTML = ""; ph.classList.remove("has-img");
+  }
+  renderPins();
+}
+document.addEventListener("visibilitychange", () => {
+  clearTimeout(releaseT);
+  if (document.hidden) { releaseT = setTimeout(releaseAll, RELEASE_MS); return; }
+  if (!released) return queueSnaps();
+  released = false;
+  cull();
+  queueSnaps();
+});
+
 // ---------- virtualization ----------
 // Only frames near the viewport get a live iframe, capped at LIVE (nearest to the center first).
 // Frames that leave the viewport are unloaded after HIDE_MS so quick pans don't thrash; their scroll is restored on return.
@@ -226,17 +251,18 @@ function mount(f) {
   f.el.classList.add("live");
   f.el.classList.remove("loaded"); // stripes (or the snapshot) stay until the page has loaded
 }
-function unmount(f) {
+function unmount(f, keepSnapshot = true) {
   if (!f.iframe) return;
   try { const w = f.iframe.contentWindow; if (w.scrollX || w.scrollY) f.scroll = { x: w.scrollX, y: w.scrollY }; } catch {}
   clearTimeout(f.snapT);
-  snap(f, docOf(f));
+  if (keepSnapshot) snap(f, docOf(f));
   f.iframe.remove();
   f.iframe = null;
   f.hiddenSince = 0;
   f.el.classList.remove("live", "loaded");
 }
 function cull() {
+  if (released) return;
   const mx = innerWidth * MARGIN / pan.k, my = innerHeight * MARGIN / pan.k;
   const a = toWorld(0, 0), b = toWorld(innerWidth, innerHeight);
   const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, now = Date.now();
@@ -388,6 +414,14 @@ function renderPop() {
   const t = draft ? { ...draft, id: "draft", msgs: [], draft: true } : threads.find((x) => x.id === openThread);
   if (!t) { pop.hidden = true; return; }
   const where = [t.frame && frames.get(t.frame)?.title, t.text && `“${t.text}”`].filter(Boolean).join(" › ") || "Canvas";
+  // Redraws happen whenever comments or frames change on disk (e.g. Claude replying). If this same thread or draft is
+  // already open, keep what the user is typing: text, cursor, focus and the message list's scroll.
+  const key = t.draft ? `draft:${t.frame}:${t.x}:${t.y}` : t.id;
+  const same = !pop.hidden && pop.dataset.for === key;
+  const ta0 = pop.querySelector("textarea"), list0 = pop.querySelector(".msgs");
+  const keep = same && ta0 ? { value: ta0.value, start: ta0.selectionStart, end: ta0.selectionEnd, focused: document.activeElement === ta0,
+    atBottom: !list0 || list0.scrollTop + list0.clientHeight >= list0.scrollHeight - 4, scroll: list0?.scrollTop || 0 } : null;
+  pop.dataset.for = key;
   pop.innerHTML = `<header><span class="t" title="${esc(t.sel || "")}">${t.draft ? "New comment" : `#${num(t)}`} · ${esc(where)}</span>
       ${t.draft ? "" : `<button data-act="status" class="${t.status === "resolved" ? "ok" : ""}" title="${t.status === "resolved" ? "Reopen" : "Resolve"}"><svg viewBox="0 0 24 24"><path d="M5 12l5 5L20 7"/></svg></button>
       <button data-act="delete" title="Delete thread"><svg viewBox="0 0 24 24"><path d="M5 7h14M10 7V4h4v3M7 7l1 13h8l1-13"/></svg></button>`}
@@ -399,10 +433,16 @@ function renderPop() {
       <div class="send"><label class="ck"><input type="checkbox" ${toClaude ? "checked" : ""}><span class="box"><svg viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg></span>Send to Claude</label>
       <button disabled title="Send (Enter)"><svg viewBox="0 0 24 24"><path d="M12 19V5M5 12l7-7 7 7"/></svg></button></div></form>`;
   pop.hidden = false;
-  const msgs = pop.querySelector(".msgs");
-  if (msgs) msgs.scrollTop = msgs.scrollHeight;
+  const msgs = pop.querySelector(".msgs"), ta = pop.querySelector("textarea");
+  if (msgs) msgs.scrollTop = !keep || keep.atBottom ? msgs.scrollHeight : keep.scroll;
+  if (keep) {
+    ta.value = keep.value;
+    ta.style.height = "auto"; ta.style.height = `${ta.scrollHeight}px`;
+    pop.querySelector("form button").disabled = !keep.value.trim();
+    if (keep.focused) { ta.focus(); ta.setSelectionRange(keep.start, keep.end); }
+  }
   placePop();
-  requestAnimationFrame(() => pop.querySelector("textarea")?.focus());
+  if (!keep) requestAnimationFrame(() => pop.querySelector("textarea")?.focus()); // focus only when the box first opens
 }
 function placePop() {
   if (pop.hidden) return;
@@ -473,6 +513,7 @@ pop.addEventListener("submit", async (e) => {
     const t = await api("/_api/threads", { ...draft, body, by: ME, claude: toClaude });
     draft = null; openThread = t.id;
   } else await api(`/_api/threads/${openThread}/reply`, { body, by: ME, claude: toClaude });
+  pop.querySelector("textarea").value = ""; // sent: the redraw below must not bring it back
   await loadThreads();
 });
 
@@ -482,10 +523,6 @@ function renderPanel() {
   $("#openCount").textContent = open || "";
   document.body.classList.toggle("hide-resolved", $("#panel").hidden || panelFilter !== "resolved");
   if ($("#panel").hidden) return;
-  const live = CLAUDE.watching || threads.some((t) => queueState(t) === "working");
-  $("#claudeState").className = live ? "on" : "";
-  $("#claudeState").textContent = live ? "Claude is watching" : "Claude answers when asked";
-  $("#claudeState").title = live ? "A Claude session is picking up comments sent to Claude as they arrive" : "Comments sent to Claude wait until you ask a Claude session to answer them (or enable watching: canvas watch on)";
   const list = threads.filter((t) => (panelFilter === "resolved") === (t.status === "resolved")).reverse();
   $("#plist").innerHTML = list.length ? list.map((t) => `<div class="pitem${openThread === t.id ? " on" : ""}" data-id="${t.id}">
       <div class="where">#${num(t)} · ${esc([t.frame && frames.get(t.frame)?.title || t.frame, t.text && `“${t.text}”`].filter(Boolean).join(" › ") || "Canvas")}</div>
@@ -818,7 +855,7 @@ function connect() {
     const files = all.filter(mine).map((f) => (PAGE ? f.slice(PAGE.length + 1) : f));
     if (all.some((f) => !mine(f) && /(\.html|canvas\.json)$/.test(f)) || files.some((f) => f.includes("/") && /(\.html|canvas\.json)$/.test(f))) refreshPages();
     const top = files.filter((f) => !f.includes("/"));
-    if (top.includes("comments.json") || top.includes(".claude-watch")) await loadThreads();
+    if (top.includes("comments.json")) await loadThreads();
     const html = top.filter((f) => f.endsWith(".html"));
     if (html.length || top.includes("canvas.json")) await loadState();
     for (const f of html) if (frames.has(f)) reloadFrame(frames.get(f));
