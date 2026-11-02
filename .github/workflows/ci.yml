@@ -1,9 +1,9 @@
 name: CI
 
+# Runs on pull requests into master (releases). Work on develop isn't checked by CI; run `npm test` locally.
 on:
-  push:
-    branches: [master, develop]
   pull_request:
+    branches: [master]
 
 permissions:
   contents: read
