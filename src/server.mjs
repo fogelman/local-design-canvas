@@ -114,7 +114,7 @@ export function serve(dir, port) {
       if (p === "/_api/me") return json({ name: me() });
       // project files
       const file = path.join(dir, path.normalize(p).replace(/^(\.\.[/\\])+/, ""));
-      if (!file.startsWith(dir)) { res.writeHead(403); return res.end(); }
+      if (file !== dir && !file.startsWith(dir + path.sep)) { res.writeHead(403); return res.end(); } // inside the canvas only
       if (file.endsWith(".html") && !file.split(path.sep).includes("_ds") && fs.existsSync(file)) {
         res.writeHead(200, { "content-type": TYPES[".html"], "cache-control": "no-store" });
         return res.end(expandFile(file, dir));

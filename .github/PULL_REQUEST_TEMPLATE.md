@@ -8,7 +8,8 @@
 
 ## How I tested it
 
-- [ ] `node --check` on the files I touched
+- [ ] `npm test` passes (and `npm run test:e2e` if I changed the viewer)
+- [ ] Added or updated tests for the change
 - [ ] Tried it with `canvas examples/demo`: comment → `canvas comments` → `canvas reply`, saving and discarding a move, switching pages
 - [ ] `claude plugin validate .` (if plugin files changed)
 - [ ] Updated the README, the skill or `canvas --help` (if behaviour changed)
