@@ -4,7 +4,7 @@ import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
 import http from "node:http";
-import { makeCanvas, cleanup, page, startServer, sleep } from "../helpers.mjs";
+import { makeCanvas, cleanup, page, startServer, sleep, canvas } from "../helpers.mjs";
 
 let dir, server;
 before(async () => {
@@ -58,6 +58,19 @@ test("threads: create, reply, resolve, delete", async () => {
   assert.equal((await post(`/_api/threads/${t.id}/status`, { status: "resolved" })).status, "resolved");
   await post(`/_api/threads/${t.id}/delete`, {});
   assert.deepEqual((await (await get("/_api/state")).json()).threads, []);
+});
+
+test("replying reopens a resolved thread; sent to Claude, it's back in Claude's queue", async () => {
+  const t = await post("/_api/threads", { frame: "inbox.html", body: "Bigger title", by: "Ana", claude: true });
+  await post(`/_api/threads/${t.id}/status`, { status: "resolved" });
+  const note = await post(`/_api/threads/${t.id}/reply`, { body: "One more thing", by: "Bo" });
+  assert.equal(note.status, "open", "any reply reopens it");
+  assert.doesNotMatch(canvas(["comments", "--dir", dir]).out, new RegExp(`^${t.id} `, "m"), "a note between people isn't for Claude");
+  await post(`/_api/threads/${t.id}/status`, { status: "resolved" });
+  const again = await post(`/_api/threads/${t.id}/reply`, { body: "Actually, a bit smaller", by: "Ana", claude: true });
+  assert.equal(again.status, "open");
+  assert.match(canvas(["comments", "--dir", dir]).out, new RegExp(`^${t.id} inbox\\.html[\\s\\S]*Actually, a bit smaller`, "m"), "back in Claude's queue");
+  await post(`/_api/threads/${t.id}/delete`, {});
 });
 
 test("layout saves positions in a batch", async () => {
