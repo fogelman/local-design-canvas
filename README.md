@@ -40,7 +40,7 @@ Then, in a Claude Code session inside your project:
 1. Press **C** and click any element of a screen. Write your comment and keep **Send to Claude** checked. Unchecked comments are notes between people; Claude ignores them.
 2. Claude runs `canvas comments` and gets a few lines per thread: the file, the exact element and your message.
 3. Claude edits that one file. The screen reloads in your browser, keeping your scroll position and anything you're typing.
-4. Claude replies in the thread and resolves it, or asks you a question.
+4. Claude replies in the thread and resolves it, or asks you a question. Not happy with the result? Reply in the thread, even a resolved one, with **Send to Claude** checked, and it goes back to Claude.
 
 ![Claude's reply in the thread](assets/claude-reply.png)
 
