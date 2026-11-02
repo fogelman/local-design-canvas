@@ -1,0 +1,2 @@
+<!-- <ds-topbar active="Inbox"></ds-topbar> · app header with the main navigation -->
+<header class="topbar"><span class="logo">Helpdesk</span><nav>{{@items|Inbox,Customers,Reports::<a class="$=active" href="#">$</a>}}</nav><span class="grow"></span><slot></slot></header>

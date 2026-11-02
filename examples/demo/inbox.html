@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="canvas:size" content="1280x800">
+<title>Inbox</title>
+<link rel="stylesheet" href="_ds/ds.css">
+</head>
+<body>
+<ds-topbar active="Inbox"><ds-button href="new-ticket.html">New ticket</ds-button></ds-topbar>
+<main class="page">
+  <div class="row"><h1>Inbox</h1><ds-badge status="open">7 unread</ds-badge><span class="grow"></span><ds-button variant="ghost">Filters</ds-button></div>
+  <div class="stats">
+    <ds-stat label="Open tickets" value="24"></ds-stat>
+    <ds-stat label="Urgent" value="3"></ds-stat>
+    <ds-stat label="Solved this week" value="58"></ds-stat>
+  </div>
+  <div class="card">
+    <ds-ticket-row subject="Can't reset my password" from="Maya Chen · maya@example.com" status="urgent" label="Urgent" when="12 min" href="ticket.html"></ds-ticket-row>
+    <ds-ticket-row subject="Invoice shows the wrong address" from="Leo Martins · leo@example.com" status="open" label="Open" when="1 h" href="ticket.html"></ds-ticket-row>
+    <ds-ticket-row subject="Feature request: dark mode" from="Ana Ruiz · ana@example.com" status="open" label="Open" when="3 h" href="ticket.html"></ds-ticket-row>
+    <ds-ticket-row subject="Thanks for the quick fix!" from="Sam Okafor · sam@example.com" status="done" label="Solved" when="Yesterday" href="ticket.html"></ds-ticket-row>
+  </div>
+</main>
+</body>
+</html>

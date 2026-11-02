@@ -1,0 +1,40 @@
+name: Bug report
+description: Something doesn't work as described
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened?
+      description: What you did, what you expected, and what happened instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. canvas examples/demo
+        2. Press C and click …
+        3. …
+    validations:
+      required: true
+  - type: dropdown
+    id: install
+    attributes:
+      label: How do you use it?
+      options: [Claude Code plugin, Command line (npm link), Both]
+    validations:
+      required: true
+  - type: input
+    id: env
+    attributes:
+      label: Node version, OS and browser
+      placeholder: "node v22.11, macOS 15, Chrome 131"
+    validations:
+      required: true
+  - type: textarea
+    id: logs
+    attributes:
+      label: Errors or screenshots
+      description: Output from the terminal running `canvas`, the browser console, or screenshots. Leave out anything private.

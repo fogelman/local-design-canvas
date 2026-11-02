@@ -142,7 +142,7 @@ body.hide-resolved .pin.resolved { display: none; }
 #present .bar button:hover { background: var(--hov); }
 #pTitle { padding: 0 10px; color: var(--mid); white-space: nowrap; }
 
-/* status pill (app/pill.js), in the canvas's pill + modal-button style */
+/* status pill (js/pill.js), in the canvas's pill + modal-button style */
 .spill-host { position: fixed; inset: 10px 0 auto 0; z-index: 50; display: flex; justify-content: center; pointer-events: none; }
 .spill { display: flex; height: 38px; align-items: center; overflow: hidden; border-radius: 10px; font-size: 13px; white-space: nowrap; color: var(--ink);
   background: var(--pill); border: 1px solid var(--pill-line); box-shadow: var(--shadow); transition: background-color .15s, border-color .15s;
