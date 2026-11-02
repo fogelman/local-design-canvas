@@ -60,12 +60,13 @@ test("threads: create, reply, resolve, delete", async () => {
   assert.deepEqual((await (await get("/_api/state")).json()).threads, []);
 });
 
-test("a reply sent to Claude reopens a resolved thread; a plain note doesn't", async () => {
+test("replying reopens a resolved thread; sent to Claude, it's back in Claude's queue", async () => {
   const t = await post("/_api/threads", { frame: "inbox.html", body: "Bigger title", by: "Ana", claude: true });
-  await post(`/_api/threads/${t.id}/reply`, { body: "Done.", by: "Claude" });
   await post(`/_api/threads/${t.id}/status`, { status: "resolved" });
-  const note = await post(`/_api/threads/${t.id}/reply`, { body: "Looks good to me", by: "Bo" });
-  assert.equal(note.status, "resolved", "a note between people leaves it resolved");
+  const note = await post(`/_api/threads/${t.id}/reply`, { body: "One more thing", by: "Bo" });
+  assert.equal(note.status, "open", "any reply reopens it");
+  assert.doesNotMatch(canvas(["comments", "--dir", dir]).out, new RegExp(`^${t.id} `, "m"), "a note between people isn't for Claude");
+  await post(`/_api/threads/${t.id}/status`, { status: "resolved" });
   const again = await post(`/_api/threads/${t.id}/reply`, { body: "Actually, a bit smaller", by: "Ana", claude: true });
   assert.equal(again.status, "open");
   assert.match(canvas(["comments", "--dir", dir]).out, new RegExp(`^${t.id} inbox\\.html[\\s\\S]*Actually, a bit smaller`, "m"), "back in Claude's queue");

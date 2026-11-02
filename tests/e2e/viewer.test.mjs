@@ -81,3 +81,16 @@ test("reloads wait while the person is busy, and R applies them", { skip }, asyn
   assert.ok(!(await kept()), "R reloaded it");
   assert.deepEqual(errors, []);
 });
+
+test("replying in a resolved thread reopens it and the panel follows it to Open", { skip }, async () => {
+  await page.click("#panelBtn");
+  await page.click(".ptabs [data-f='resolved']");
+  await page.click("#plist .pitem[data-id='c1']");
+  await composerFocused();
+  await page.keyboard.type("Make the badge grey instead");
+  await page.keyboard.press("Enter");
+  await page.waitForFunction(() => threads.find((t) => t.id === "c1")?.status === "open");
+  assert.equal(await page.getAttribute(".ptabs .on", "data-f"), "open");
+  assert.match(canvas(["comments", "--dir", dir]).out, /^c1 inbox\.html[\s\S]*Make the badge grey instead/m, "sent to Claude, so it's queued");
+  assert.deepEqual(errors, []);
+});

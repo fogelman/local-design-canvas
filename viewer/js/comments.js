@@ -191,6 +191,10 @@ pop.addEventListener("submit", async (e) => {
     draft = null; openThread = t.id;
   } else await api(`/_api/threads/${openThread}/reply`, { body, by: ME, claude: toClaude });
   pop.querySelector("textarea").value = ""; // sent: the redraw below must not bring it back
+  if (!draft && panelFilter === "resolved") { // replying reopened the thread: follow it to the Open tab
+    panelFilter = "open";
+    document.querySelectorAll(".ptabs button").forEach((x) => x.classList.toggle("on", x.dataset.f === "open"));
+  }
   await loadThreads();
 });
 
