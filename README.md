@@ -26,7 +26,7 @@ On older Claude Code, use two steps: `/plugin marketplace add fogelman/local-des
 ```bash
 git clone https://github.com/fogelman/local-design-canvas && cd local-design-canvas
 npm link
-canvas examples/demo        # opens the example canvas in your browser
+canvas open examples/demo   # opens the example canvas in your browser
 ```
 
 Then, in a Claude Code session inside your project:
@@ -74,7 +74,9 @@ Start the file with a one-line `<!-- usage -->` comment, so `canvas ds` can list
 
 | Command | What it does |
 |---|---|
-| `canvas [dir]` | Serve a folder as a canvas and open it in the browser |
+| `canvas create <dir>` | Make a folder a canvas (creates it if needed) |
+| `canvas open [dir]` | Serve a canvas and open it in the browser. `canvas [dir]` is short for it. It never creates folders, so a typo fails instead of making an empty canvas |
+| `canvas list` | Canvases being served right now, with their URL and folder (`--json` for scripts) |
 | `canvas new <name> [WxH]` | Create a screen (for example `canvas new inbox-mobile 390x844`) |
 | `canvas comments [--open\|--all]` | Threads waiting for Claude (default), all open threads, or everything |
 | `canvas reply <id> "text" [--resolve]` | Answer a thread |
