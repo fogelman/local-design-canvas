@@ -7,6 +7,7 @@ import { allThreads, claim, claimed, now, queued, splitId, updateThread, waitFor
 import { listComponents } from "./components.mjs";
 import { sessionNote } from "./hook.mjs";
 import { serve } from "./server.mjs";
+import { running } from "./registry.mjs";
 import { shot } from "./shot.mjs";
 // ---------- cli ----------
 let CSS = '<link rel="stylesheet" href="styles.css">';
@@ -51,7 +52,10 @@ function flag(args, name) {
 
 const HELP = `canvas — offline design canvas with comment threads
 
-  canvas [dir] [--port N] [--no-open]   serve dir as a canvas (every *.html = a frame)
+  canvas create <dir>                   make <dir> a canvas (creates the folder and canvas.json; doesn't serve it)
+  canvas open [dir] [--port N] [--no-open]   serve an existing canvas folder (every *.html = a frame)
+  canvas [dir]                          short for \`canvas open [dir]\`
+  canvas list [--json]                  canvases being served right now: url, folder, comments waiting on Claude
   canvas new <name> [WxH] [--dir d]     create <name>.html (default 1280x800; 390x844 for mobile)
   canvas comments [--open|--all] [--dir d]   threads waiting on Claude (default) · all open · everything
   canvas watch [on|off] [--dir d]        should Claude answer comments as they arrive? (asked once per canvas)
@@ -74,7 +78,15 @@ const dirFlag = flag(args, "--dir");
 const dirOf = (d) => path.resolve(typeof d === "string" ? d : ".");
 
 if (cmd === "-h" || cmd === "--help" || cmd === "help") console.log(HELP);
-else if (cmd === "new") {
+else if (cmd === "list" || cmd === "ls") {
+  const list = running().map((e) => ({ ...e, waiting: fs.existsSync(e.dir) ? allThreads(e.dir).filter(waiting).length : 0 }));
+  if (flag(args, "--json")) console.log(JSON.stringify(list, null, 2));
+  else if (!list.length) console.log("no canvases open");
+  else {
+    const w = Math.max(...list.map((e) => e.url.length));
+    for (const e of list) console.log(`${e.url.padEnd(w)}  ${e.dir}${e.waiting ? `  (${e.waiting} waiting on Claude)` : ""}`);
+  }
+} else if (cmd === "new") {
   const dir = dirOf(dirFlag);
   const name = args[1];
   if (!name) { console.error("usage: canvas new <name> [WxH]"); process.exit(1); }
@@ -132,9 +144,25 @@ else if (cmd === "new") {
 } else if (cmd === "resolve" || cmd === "reopen") {
   updateThread(...splitId(dirOf(dirFlag), args[1]), (t) => (t.status = cmd === "resolve" ? "resolved" : "open"));
   console.log(`${args[1]} ${cmd === "resolve" ? "resolved" : "reopened"}`);
+} else if (cmd === "create") {
+  const target = dirFlag || args[1];
+  if (!target || target === true) { console.error("usage: canvas create <dir>"); process.exit(1); }
+  const dir = dirOf(target), file = path.join(dir, LAYOUT);
+  if (fs.existsSync(dir) && !fs.statSync(dir).isDirectory()) { console.error(`${dir} is a file`); process.exit(1); }
+  if (fs.existsSync(file)) { console.error(`${dir} is already a canvas; open it with \`canvas open ${target}\``); process.exit(1); }
+  fs.mkdirSync(dir, { recursive: true });
+  writeJSON(file, { frames: {} });
+  console.log(`${dir}\n  add a screen: canvas new <name> [WxH] --dir ${target}\n  open it:      canvas open ${target}`);
 } else {
+  // `canvas open [dir]`, or the short form `canvas [dir]`. Never creates folders: a typo or a mistyped command shouldn't make a canvas.
   const port = +(flag(args, "--port") || 4747);
-  const dir = dirOf(dirFlag || (cmd && !cmd.startsWith("--") ? cmd : "."));
-  if (!fs.existsSync(dir)) fs.mkdirSync(dir, { recursive: true });
+  const rest = (cmd === "open" ? args.slice(1) : args).filter((a) => !a.startsWith("--"));
+  const target = typeof dirFlag === "string" ? dirFlag : rest[0] || ".";
+  const dir = dirOf(target);
+  if (!fs.statSync(dir, { throwIfNoEntry: false })?.isDirectory()) {
+    const hint = cmd !== "open" && !dirFlag && !/[\\/.]/.test(target) ? ` (if you meant a command, see \`canvas --help\`)` : "";
+    console.error(`no canvas folder at ${dir}${hint}\n  create one with: canvas create ${target}`);
+    process.exit(1);
+  }
   serve(dir, port);
 }

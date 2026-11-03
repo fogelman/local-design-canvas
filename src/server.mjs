@@ -8,6 +8,7 @@ import { LAYOUT, me, pageDir, pages, readJSON, saveThreads, state, threadsOf, wr
 import { addThread, now, updateThread } from "./threads.mjs";
 import { expandFile } from "./components.mjs";
 import { watchTree } from "./watch.mjs";
+import { register } from "./registry.mjs";
 export const APP = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "viewer");
 
 // ---------- server ----------
@@ -131,6 +132,7 @@ export function serve(dir, port) {
   server.listen(port, "127.0.0.1", () => {
     const url = `http://127.0.0.1:${server.address().port}/`;
     console.log(`canvas: ${dir}\n  ${url}`);
+    register({ dir, port: server.address().port, url });
     if (!process.argv.includes("--no-open")) {
       const [cmd, args] = process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : ["xdg-open", [url]];
       try { spawn(cmd, args, { stdio: "ignore", detached: true }).on("error", () => {}).unref(); } catch {}

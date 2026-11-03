@@ -28,7 +28,7 @@ Don't open a public issue. Use the repository's **Security → Report a vulnerab
 git clone https://github.com/fogelman/local-design-canvas && cd local-design-canvas
 npm link                                            # `canvas` on your PATH, from your working copy
 ln -s "$PWD/skills/canvas" ~/.claude/skills/canvas    # the skill, from your working copy
-canvas examples/demo                                # try your changes
+canvas open examples/demo                           # try your changes
 ```
 
 Edits are live: the viewer reloads itself when files in `viewer/` change. Restart `canvas` after changing `src/`.
