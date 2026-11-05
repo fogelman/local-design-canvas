@@ -94,3 +94,73 @@ test("replying in a resolved thread reopens it and the panel follows it to Open"
   assert.match(canvas(["comments", "--dir", dir]).out, /^c1 inbox\.html[\s\S]*Make the badge grey instead/m, "sent to Claude, so it's queued");
   assert.deepEqual(errors, []);
 });
+
+// Renders `file` live in an iframe and as its snapshot in an <img>, both at the frame's size, and returns
+// the share of pixels that differ visibly (antialiasing at glyph edges stays under the threshold).
+async function snapshotDiff(file) {
+  const f = await page.evaluate((file) => { const f = frames.get(file); return { w: f.w, h: f.h, url: src(file) }; }, file);
+  await page.setViewportSize({ width: f.w, height: f.h * 2 });
+  const failed = await page.evaluate(async ({ w, h, url }) => {
+    const box = document.createElement("div");
+    box.id = "cmp";
+    Object.assign(box.style, { position: "fixed", inset: 0, zIndex: 99, background: "#fff" });
+    document.body.appendChild(box);
+    const ifr = document.createElement("iframe");
+    Object.assign(ifr.style, { width: `${w}px`, height: `${h}px`, border: 0, display: "block" });
+    ifr.src = url;
+    box.appendChild(ifr);
+    await new Promise((r) => (ifr.onload = r));
+    await new Promise((r) => setTimeout(r, 300));
+    try {
+      const img = new Image();
+      img.src = await render(capture(ifr.contentDocument, { w, h }));
+      await img.decode();
+      Object.assign(img.style, { width: `${w}px`, height: `${h}px`, display: "block" });
+      box.appendChild(img);
+    } catch (e) { return String(e.message || e); }
+  }, f);
+  try {
+    assert.equal(failed, undefined, `${file} could not be pictured`);
+    const [live, shot] = [await page.locator("#cmp iframe").screenshot(), await page.locator("#cmp img").screenshot()];
+    return await page.evaluate(async ([a, b]) => {
+      const px = async (b64) => {
+        const i = new Image(); i.src = `data:image/png;base64,${b64}`; await i.decode();
+        const c = new OffscreenCanvas(i.width, i.height).getContext("2d"); c.drawImage(i, 0, 0);
+        return c.getImageData(0, 0, i.width, i.height).data;
+      };
+      const [p, q] = await Promise.all([px(a), px(b)]);
+      let n = 0;
+      for (let k = 0; k < p.length; k += 4) if (Math.max(Math.abs(p[k] - q[k]), Math.abs(p[k + 1] - q[k + 1]), Math.abs(p[k + 2] - q[k + 2])) > 80) n++;
+      return n / (p.length / 4);
+    }, [live.toString("base64"), shot.toString("base64")]);
+  } finally {
+    await page.evaluate(() => document.getElementById("cmp")?.remove());
+    await page.setViewportSize({ width: 1440, height: 900 });
+  }
+}
+
+test("a screen's snapshot looks like the live screen: :root variables, stylesheets, components", { skip }, async () => {
+  for (const file of ["inbox.html", "ticket.html", "inbox-mobile.html"]) {
+    const diff = await snapshotDiff(file);
+    assert.ok(diff < 0.005, `${file}: ${(diff * 100).toFixed(2)}% of pixels differ`); // a broken snapshot differs on tens of percent
+  }
+  assert.deepEqual(errors, []);
+});
+
+test("a screen scrolled inside keeps the stripes instead of a snapshot that differs", { skip }, async () => {
+  const shown = await page.evaluate(async () => {
+    const f = frames.get("inbox.html"), doc = f.iframe.contentDocument;
+    const el = doc.createElement("div");
+    Object.assign(el.style, { height: "40px", overflow: "auto" });
+    el.innerHTML = '<div style="height:400px">tall</div>';
+    doc.body.appendChild(el);
+    el.scrollTop = 100;
+    await snap(f, doc);
+    const has = f.el.querySelector(".ph").classList.contains("has-img");
+    el.remove();
+    await snap(f, doc);
+    return [has, f.el.querySelector(".ph").classList.contains("has-img")];
+  });
+  assert.deepEqual(shown, [false, true]);
+  assert.deepEqual(errors, []);
+});

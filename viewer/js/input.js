@@ -110,6 +110,7 @@ function connect() {
       return location.reload();
     }
     const all = ev.files;
+    if (all.some((f) => !f.endsWith(".json"))) inlined.clear(); // files inlined into snapshots may have changed
     const pageIds = new Set(PAGES.map((x) => x.id).filter(Boolean));
     const mine = (f) => PAGE ? f.startsWith(`${PAGE}/`) : !pageIds.has(f.split("/")[0]);
     const files = all.filter(mine).map((f) => (PAGE ? f.slice(PAGE.length + 1) : f));
