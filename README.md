@@ -123,7 +123,7 @@ The canvas tool is only the server, the viewer and the command line. The files b
 
 ## Performance
 
-Only the screens near your view run as live pages, at most 12. The rest show a lightweight snapshot, or diagonal stripes until they've loaded. After 15 seconds in a hidden tab, the canvas releases everything and reloads what's in view when you come back. Hundreds of screens on one page stay smooth.
+Only the screens near your view run as live pages, at most 12. The rest show a picture that matches the live page, or diagonal stripes until it's ready. A screen whose current state a picture can't hold (scrolled, an open modal, video or canvas) keeps the stripes rather than show something different. After 15 seconds in a hidden tab, the canvas releases everything and reloads what's in view when you come back. Hundreds of screens on one page stay smooth.
 
 ## Contributing
 

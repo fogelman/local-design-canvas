@@ -31,45 +31,164 @@ function renderFrames(list) {
 }
 
 // ---------- snapshots ----------
-// Unloaded frames show a static picture: the frame's DOM + CSS serialized into an SVG <foreignObject> image.
-// Cheap to paint at any zoom; external images/fonts inside don't load in SVG images, so it's an approximation.
-function snap(f, doc) {
-  if (!doc?.documentElement) return;
+// Frames that aren't live show a picture of the page: its DOM and CSS rendered by the browser as an SVG
+// <foreignObject> image, then rasterized. An SVG image can't load anything and its :root is the <svg>, so every
+// stylesheet, image and font is inlined and :root is retargeted; CSS is taken as written, because the browser's
+// re-serialization loses values (`font: 700 15px var(--x)` plus a font longhand comes back empty).
+// A picture never shows something the live page doesn't: when a page holds state a picture can't (scrolled, an
+// open modal, canvas/video/frames, shadow DOM, a file that can't be read), the frame keeps the stripes instead.
+const inlined = new Map(); // url -> Promise<data URL or text | null>, shared by all snapshots; cleared when files change
+function fetchOnce(url, as) {
+  const key = `${as} ${url}`;
+  if (!inlined.has(key)) inlined.set(key, fetch(url).then((r) => (r.ok ? (as === "text" ? r.text() : r.blob()) : null))
+    .then((b) => (as === "text" || !b ? b : new Promise((res) => { const fr = new FileReader(); fr.onload = () => res(fr.result); fr.onerror = () => res(null); fr.readAsDataURL(b); })))
+    .catch(() => null));
+  return inlined.get(key);
+}
+class Unsnappable extends Error {}
+const URL_RE = /url\(\s*(['"]?)([^'")]*)\1\s*\)/g;
+async function inlineUrls(text, base) {
+  const urls = new Set();
+  for (const m of text.matchAll(URL_RE)) if (m[2] && !/^(data:|#)/.test(m[2])) urls.add(m[2]);
+  const map = new Map();
+  await Promise.all([...urls].map(async (u) => { try { const d = await fetchOnce(new URL(u, base).href, "data"); if (d) map.set(u, d); } catch {} }));
+  return text.replace(URL_RE, (m, q, u) => (map.has(u) ? `url("${map.get(u)}")` : m)); // a missing file stays missing, as it is live
+}
+async function sheetText(text, base, depth = 0) {
+  text = text.replace(/\/\*[\s\S]*?\*\//g, "");
+  const imports = [...text.matchAll(/@import\s+(?:url\(\s*)?(['"]?)([^'")\s;]+)\1\s*\)?\s*([^;]*);/g)];
+  for (const m of imports) {
+    if (depth > 8 || /\b(layer|supports)\b/.test(m[3])) throw new Unsnappable("@import with layer/supports");
+    const href = new URL(m[2], base).href, inner = await fetchOnce(href, "text");
+    if (inner == null) throw new Unsnappable(`stylesheet ${href}`);
+    const css = await sheetText(inner, href, depth + 1);
+    text = text.replace(m[0], () => (m[3].trim() ? `@media ${m[3].trim()} {\n${css}\n}` : css));
+  }
+  return inlineUrls(text, base);
+}
+// Synchronous part: everything read from the live document, so the frame can be torn down right after.
+function capture(doc, f) {
+  const win = doc.defaultView;
+  if (win.scrollX || win.scrollY) throw new Unsnappable("page scrolled");
+  const de = doc.documentElement, barY = win.innerWidth > de.clientWidth, barX = win.innerHeight > de.clientHeight;
+  if (doc.querySelector("iframe, frame, video, object, embed, dialog:modal, :popover-open, :fullscreen")) throw new Unsnappable("element a picture can't hold");
+  const sheets = [];
+  for (const ss of [...doc.styleSheets, ...(doc.adoptedStyleSheets || [])]) {
+    if (ss.disabled) continue;
+    const node = ss.ownerNode, media = ss.media?.mediaText || "";
+    if (node?.localName === "link") sheets.push({ href: ss.href, media });
+    else if (node?.localName === "style" && (node.textContent.trim() || !ss.cssRules.length)) sheets.push({ text: node.textContent, base: doc.baseURI, media });
+    else sheets.push({ text: [...ss.cssRules].map((r) => r.cssText).join("\n"), base: doc.baseURI, media }); // rules added by script
+  }
+  const root = doc.documentElement.cloneNode(true);
+  const src = [doc.documentElement, ...doc.documentElement.querySelectorAll("*")], dst = [root, ...root.querySelectorAll("*")];
+  const images = [];
+  src.forEach((s, i) => {
+    const d = dst[i];
+    if (s.scrollTop || s.scrollLeft) throw new Unsnappable("scrolled inside");
+    if (s.shadowRoot) throw new Unsnappable("shadow DOM");
+    const tag = s.localName;
+    if (tag === "input") { if (s.type === "checkbox" || s.type === "radio") d.toggleAttribute("checked", s.checked); else if (s.type !== "file") d.setAttribute("value", s.value); }
+    else if (tag === "textarea") d.textContent = s.value;
+    else if (tag === "select") [...s.options].forEach((o, j) => d.options[j].toggleAttribute("selected", o.selected));
+    else if (tag === "canvas") {
+      const img = doc.createElement("img");
+      for (const a of s.attributes) img.setAttribute(a.name, a.value);
+      img.src = s.toDataURL(); // throws when tainted: unsnappable
+      d.replaceWith(img);
+    } else if (tag === "img" && (s.currentSrc || s.src)) {
+      if (s.complete && !s.naturalWidth) return; // broken live too
+      images.push({ el: d, attr: "src", url: s.currentSrc || s.src });
+      d.removeAttribute("srcset"); d.removeAttribute("loading");
+    } else if ((tag === "image" || tag === "use" || tag === "feImage") && (s.getAttribute("href") || s.getAttribute("xlink:href"))) {
+      const u = s.getAttribute("href") || s.getAttribute("xlink:href");
+      if (u.startsWith("#")) return;
+      if (tag === "use") throw new Unsnappable("external <use>"); // can't be inlined
+      images.push({ el: d, attr: "href", url: new URL(u, doc.baseURI).href });
+    } else if (tag === "source" && s.parentNode?.localName === "picture") d.remove();
+    if (s.getAttribute?.("style")?.includes("url(")) images.push({ el: d, attr: "style", text: s.getAttribute("style") });
+  });
+  root.querySelectorAll("script, link, style, noscript").forEach((n) => n.remove());
+  root.setAttribute("data-snap-root", "");
+  // the live page's own scrollbars take room from the layout: the root element carries them in the picture
+  if (barX || barY) Object.assign(root.style, { width: `${f.w}px`, height: `${f.h}px`, overflowX: barX ? "scroll" : "hidden", overflowY: barY ? "scroll" : "hidden" });
+  return { root, sheets, images, base: doc.baseURI, w: f.w, h: f.h };
+}
+// Asynchronous part: inline files, render, rasterize.
+async function render({ root, sheets, images, base, w, h }) {
+  const css = await Promise.all(sheets.map(async (s) => {
+    let text = s.text;
+    if (s.href) { text = await fetchOnce(s.href, "text"); if (text == null) throw new Unsnappable(`stylesheet ${s.href}`); }
+    text = await sheetText(text, s.href || s.base);
+    return s.media && s.media !== "all" ? `@media ${s.media} {\n${text}\n}` : text;
+  }));
+  await Promise.all(images.map(async (im) => {
+    if (im.attr === "style") return im.el.setAttribute("style", await inlineUrls(im.text, base));
+    const d = await fetchOnce(im.url, "data");
+    if (!d) throw new Unsnappable(`image ${im.url}`);
+    im.el.setAttribute(im.attr, d);
+    if (im.attr === "href") im.el.removeAttribute("xlink:href");
+  }));
+  const style = document.createElementNS("http://www.w3.org/1999/xhtml", "style");
+  style.textContent = css.join("\n").replace(/:root\b/g, "[data-snap-root]"); // same specificity as :root
+  (root.querySelector("head") || root).appendChild(style);
+  const xhtml = new XMLSerializer().serializeToString(root);
+  const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><foreignObject x="0" y="0" width="${w}" height="${h}">${xhtml}</foreignObject></svg>`;
+  // loaded from a data: URL, not a blob: one, so the browser lets it be drawn to a canvas and kept as a bitmap,
+  // which is far lighter to keep and paint than an SVG carrying its own fonts; where that's refused, keep the SVG
+  const img = new Image();
+  img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  try { await img.decode(); } catch { throw new Unsnappable("render failed"); }
   try {
-    const css = [...doc.styleSheets].map((ss) => { try { return [...ss.cssRules].map((r) => r.cssText).join("\n"); } catch { return ""; } }).join("\n");
-    const root = doc.documentElement.cloneNode(true);
-    root.querySelectorAll("script, link, iframe, video, audio, object, embed").forEach((n) => n.remove());
-    root.querySelectorAll("style").forEach((n) => n.remove());
-    const style = doc.createElement("style");
-    style.textContent = css;
-    (root.querySelector("head") || root).appendChild(style);
-    const win = doc.defaultView, sy = win?.scrollY || 0;
-    if (sy) root.style.marginTop = `${-sy}px`;
-    const xhtml = new XMLSerializer().serializeToString(root);
-    const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${f.w}" height="${f.h}"><foreignObject x="0" y="0" width="${f.w}" height="${f.h}">${xhtml}</foreignObject></svg>`;
-    if (f.snapUrl) URL.revokeObjectURL(f.snapUrl);
-    f.snapUrl = URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" }));
-    f.snapStale = false;
-    const ph = f.el.querySelector(".ph");
-    ph.innerHTML = `<img src="${f.snapUrl}" alt="" draggable="false">`;
-    ph.classList.add("has-img");
-  } catch (e) { console.warn("snapshot failed", f.file, e); }
+    const s = Math.min(Math.max(devicePixelRatio, 1), 2, 16384 / Math.max(w, h), Math.sqrt(32e6 / (w * h)));
+    const c = document.createElement("canvas");
+    c.width = Math.round(w * s); c.height = Math.round(h * s);
+    c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
+    const png = await new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej()), "image/png"));
+    return URL.createObjectURL(png);
+  } catch { return URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" })); }
+}
+function setSnap(f, url) {
+  if (f.snapUrl) URL.revokeObjectURL(f.snapUrl);
+  f.snapUrl = url;
+  const ph = f.el.querySelector(".ph");
+  ph.innerHTML = url ? `<img src="${url}" alt="" draggable="false">` : "";
+  ph.classList.toggle("has-img", !!url);
+}
+async function snap(f, doc) {
+  if (!doc?.documentElement || !doc.defaultView) return;
+  const seq = f.snapSeq = (f.snapSeq || 0) + 1; // a newer snapshot (or a release) wins over this one
+  f.snapStale = false;
+  f.snapped = true; // tried: a page that can't be pictured isn't retried until it changes
+  try {
+    const url = await render(capture(doc, f));
+    if (seq !== f.snapSeq || released) return URL.revokeObjectURL(url);
+    setSnap(f, url);
+  } catch (e) {
+    if (seq !== f.snapSeq) return;
+    setSnap(f, null); // stripes, never a picture that differs from the page
+    if (!(e instanceof Unsnappable) && e?.name !== "SecurityError") console.warn("snapshot failed", f.file, e);
+  }
 }
 // one hidden iframe at a time renders frames that have no (or a stale) snapshot
 let snapping = false;
 function queueSnaps() {
   if (snapping || released || document.hidden) return; // no background work in a hidden tab
   const a = toWorld(innerWidth / 2, innerHeight / 2);
-  const next = [...frames.values()].filter((f) => !f.iframe && (!f.snapUrl || f.snapStale))
+  const next = [...frames.values()].filter((f) => !f.iframe && (!f.snapped || f.snapStale))
     .sort((p, q) => Math.hypot(p.x - a.x, p.y - a.y) - Math.hypot(q.x - a.x, q.y - a.y))[0];
   if (!next) return;
   snapping = true;
   const ifr = document.createElement("iframe");
   ifr.className = "snapper";
   Object.assign(ifr.style, { width: `${next.w}px`, height: `${next.h}px` });
-  const done = () => { clearTimeout(guard); ifr.remove(); snapping = false; setTimeout(queueSnaps, 30); };
-  const guard = setTimeout(() => { next.snapStale = false; done(); }, 8000);
-  ifr.addEventListener("load", () => setTimeout(() => { if (!next.iframe) { if (next.scroll) ifr.contentWindow.scrollTo(next.scroll.x, next.scroll.y); snap(next, ifr.contentDocument); } done(); }, 250));
+  let finished = false;
+  const done = () => { if (finished) return; finished = true; clearTimeout(guard); ifr.remove(); snapping = false; setTimeout(queueSnaps, 30); };
+  const guard = setTimeout(() => { next.snapStale = false; next.snapped = true; done(); }, 8000);
+  ifr.addEventListener("load", () => setTimeout(async () => {
+    if (!next.iframe) { if (next.scroll) ifr.contentWindow.scrollTo(next.scroll.x, next.scroll.y); await snap(next, ifr.contentDocument); }
+    done();
+  }, 250));
   ifr.src = src(next.file);
   document.body.appendChild(ifr);
 }
@@ -129,9 +248,9 @@ function releaseAll() {
   document.querySelector(".snapper")?.remove();
   for (const f of frames.values()) {
     unmount(f, false);
-    if (f.snapUrl) { URL.revokeObjectURL(f.snapUrl); f.snapUrl = null; }
-    const ph = f.el.querySelector(".ph");
-    ph.innerHTML = ""; ph.classList.remove("has-img");
+    f.snapSeq = (f.snapSeq || 0) + 1; // drop snapshots still rendering
+    f.snapped = false;
+    setSnap(f, null);
   }
   renderPins();
 }
