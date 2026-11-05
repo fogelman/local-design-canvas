@@ -20,7 +20,7 @@ Open an issue and pick **Feature request**. Describe the problem you're trying t
 
 ## Security issues
 
-Don't open a public issue. Use the repository's **Security → Report a vulnerability** form, or contact the maintainer privately. The server only listens on `127.0.0.1`, but reports about file access through the server, component expansion or the CLI are taken seriously.
+Don't open a public issue. Use the repository's **Security → Report a vulnerability** form, or contact the maintainer privately. The server only listens on loopback (`127.0.0.1` and `::1`, as `localhost`), but reports about file access through the server, component expansion or the CLI are taken seriously.
 
 ## Development setup
 

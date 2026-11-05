@@ -4,8 +4,9 @@ import path from "node:path";
 import http from "node:http";
 import { spawn } from "node:child_process";
 import { fileURLToPath } from "node:url";
-import { LAYOUT, me, pageDir, pages, readJSON, saveThreads, state, threadsOf, writeJSON } from "./store.mjs";
-import { addThread, now, updateThread } from "./threads.mjs";
+import { createHash } from "node:crypto";
+import { LAYOUT, assetsVersion, fileVersion, me, pageDir, pages, readJSON, state, writeJSON } from "./store.mjs";
+import { MAX_IMAGE, addThread, deleteThread, message, saveImage, updateThread } from "./threads.mjs";
 import { expandFile } from "./components.mjs";
 import { watchTree } from "./watch.mjs";
 import { register } from "./registry.mjs";
@@ -22,6 +23,17 @@ export function body(req) {
   });
 }
 
+// The raw request body, up to `limit` bytes. Past that it stops keeping the bytes but reads to the end, so the
+// client gets the error instead of a reset connection.
+export function rawBody(req, limit) {
+  return new Promise((resolve, reject) => {
+    const parts = []; let n = 0;
+    req.on("data", (c) => { n += c.length; if (n <= limit) parts.push(c); });
+    req.on("end", () => (n > limit ? reject(new Error(`image over ${Math.round(limit / 1024 / 1024)} MB`)) : resolve(Buffer.concat(parts))));
+    req.on("error", reject);
+  });
+}
+
 export function sendFile(res, file) {
   fs.readFile(file, (err, buf) => {
     if (err) { res.writeHead(404); return res.end("not found"); }
@@ -30,7 +42,28 @@ export function sendFile(res, file) {
   });
 }
 
+// How the canvas itself draws screens (the viewer's snapshot code, component expansion): an update to it makes
+// every saved picture out of date too.
+const appVersion = () => createHash("sha1").update(assetsVersion(APP) + fileVersion(fileURLToPath(new URL("./components.mjs", import.meta.url)))).digest("hex").slice(0, 12);
+
+// Added to every screen served: counts what the page is still waiting on (timers up to 5 s, fetch and XHR requests),
+// so the viewer pictures a screen only once it has finished drawing. Longer timers and intervals aren't counted:
+// a page that keeps changing is caught by the viewer watching for DOM changes instead.
+export const PENDING = `<script>/* canvas: lets the viewer tell when this page has finished drawing */(()=>{const w=window,st=w.setTimeout,ct=w.clearTimeout,ids=new Set();let n=0;
+w.setTimeout=function(f,ms,...a){if(typeof f!=="function"||ms>5000)return st.call(w,f,ms,...a);const id=st.call(w,()=>{ids.delete(id);f(...a)},ms);ids.add(id);return id};
+w.clearTimeout=(id)=>{ids.delete(id);ct.call(w,id)};
+if(w.fetch){const F=w.fetch;w.fetch=function(){n++;let p;try{p=F.apply(this,arguments)}catch(e){n--;throw e}p.then(()=>n--,()=>n--);return p}}
+const send=XMLHttpRequest.prototype.send;XMLHttpRequest.prototype.send=function(){n++;this.addEventListener("loadend",()=>n--,{once:true});return send.apply(this,arguments)};
+w.__canvasPending=()=>ids.size+n})()</script>`;
+// First thing in <head> (or where the parser would open it), so it runs before the page's own scripts; never
+// before the doctype, which would switch the page to quirks mode.
+export function withPending(html) {
+  const m = html.match(/<head\b[^>]*>/i) || html.match(/<html\b[^>]*>/i) || html.match(/^\s*<!doctype[^>]*>/i);
+  return m ? html.slice(0, m.index + m[0].length) + PENDING + html.slice(m.index + m[0].length) : PENDING + html;
+}
+
 export function serve(dir, port) {
+  const canvasId = createHash("sha1").update(path.resolve(dir)).digest("hex").slice(0, 12); // tells canvases apart in the browser's snapshot store
   const clients = new Set();
   const emit = (ev) => { for (const c of clients) c.write(`data: ${JSON.stringify(ev)}\n\n`); };
   const ownWrites = new Map(); // ignore watcher echo of our own layout saves
@@ -62,7 +95,7 @@ export function serve(dir, port) {
       }
       const page = url.searchParams.get("page") || "";
       const base = pageDir(dir, page);
-      if (p === "/_api/state") return json({ ...state(base), name: path.basename(dir), page, pages: pages(dir) });
+      if (p === "/_api/state") return json({ ...state(base), name: path.basename(dir), page, pages: pages(dir), id: canvasId, assets: `${assetsVersion(dir)}.${appVersion()}` });
       if (p === "/_api/pages" && req.method === "POST") {
         const { name } = await body(req);
         const all = pages(dir);
@@ -100,15 +133,16 @@ export function serve(dir, port) {
         return json({ ok: true });
       }
       if (p === "/_api/threads" && req.method === "POST") return json(addThread(base, await body(req)));
+      if (p === "/_api/images" && req.method === "POST") return json({ path: saveImage(base, await rawBody(req, MAX_IMAGE)) });
       const m = p.match(/^\/_api\/threads\/([\w-]+)\/(reply|status|move|delete)$/);
       if (m && req.method === "POST") {
         const b = await body(req);
         if (m[2] === "delete") {
-          const data = threadsOf(base); data.threads = data.threads.filter((t) => t.id !== m[1]); saveThreads(base, data); return json({ ok: true });
+          deleteThread(base, m[1]); return json({ ok: true });
         }
         return json(updateThread(base, m[1], (t) => {
           if (m[2] === "reply") {
-            t.msgs.push({ by: b.by || me(), at: now(), body: b.body, ...(b.claude && { claude: true }) });
+            t.msgs.push(message(base, b));
             delete t.working;
             t.status = "open"; // replying reopens a resolved thread (and, if sent to Claude, puts it back in Claude's queue)
           }
@@ -122,23 +156,39 @@ export function serve(dir, port) {
       if (file !== dir && !file.startsWith(dir + path.sep)) { res.writeHead(403); return res.end(); } // inside the canvas only
       if (file.endsWith(".html") && !file.split(path.sep).includes("_ds") && fs.existsSync(file)) {
         res.writeHead(200, { "content-type": TYPES[".html"], "cache-control": "no-store" });
-        return res.end(expandFile(file, dir));
+        return res.end(withPending(expandFile(file, dir)));
       }
       return sendFile(res, file);
     } catch (e) {
       json({ error: String(e.message || e) }, 500);
     }
   });
-  server.listen(port, "127.0.0.1", () => {
-    const url = `http://127.0.0.1:${server.address().port}/`;
+  // Local only: the two loopback addresses, nothing on the network. Both, so http://localhost works whichever one the
+  // system resolves it to first (often ::1). A port busy on either moves on to the next one.
+  const server6 = http.createServer(server.listeners("request")[0]);
+  const ready = (got) => {
+    const url = `http://localhost:${got}/`;
     console.log(`canvas: ${dir}\n  ${url}`);
-    register({ dir, port: server.address().port, url });
+    register({ dir, port: got, url });
     if (!process.argv.includes("--no-open")) {
       const [cmd, args] = process.platform === "darwin" ? ["open", [url]] : process.platform === "win32" ? ["cmd", ["/c", "start", "", url]] : ["xdg-open", [url]];
       try { spawn(cmd, args, { stdio: "ignore", detached: true }).on("error", () => {}).unref(); } catch {}
     }
-  });
-  server.on("error", (e) => {
-    if (e.code === "EADDRINUSE") { console.log(`port ${port} busy, trying ${port + 1}`); serve(dir, port + 1); } else throw e;
-  });
+  };
+  const busy = (p) => { if (p) console.log(`port ${p} busy, trying ${p + 1}`); listen(p ? p + 1 : 0); };
+  const listen = (p) => {
+    const fail4 = (e) => { if (e.code === "EADDRINUSE") busy(p); else throw e; };
+    server.once("error", fail4);
+    server.listen(p, "127.0.0.1", () => {
+      server.off("error", fail4);
+      const got = server.address().port;
+      const fail6 = (e) => {
+        if (e.code === "EADDRINUSE") return server.close(() => busy(p)); // taken on IPv6 by something else
+        ready(got); // no IPv6 on this machine: localhost resolves to 127.0.0.1
+      };
+      server6.once("error", fail6);
+      server6.listen(got, "::1", () => { server6.off("error", fail6); ready(got); });
+    });
+  };
+  listen(port);
 }

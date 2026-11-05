@@ -35,12 +35,13 @@ view.addEventListener("pointermove", (e) => {
   }
   if (tool !== "comment") return;
   const f = frameAt(e.clientX, e.clientY);
+  if (f && !f.iframe && !(f.zones && f.snapUrl)) focusFrame(f); // nothing recorded for it yet: load the page
   const w = toWorld(e.clientX, e.clientY);
-  const el = f && elementAt(f, w.x, w.y);
-  if (!el || el === docOf(f).body) return hoverEl.classList.remove("on");
-  const r = el.getBoundingClientRect();
+  const hit = f && hitAt(f, w.x, w.y);
+  if (!hit) return hoverEl.classList.remove("on");
+  const r = hit.rect;
   Object.assign(hoverEl.style, { left: `${f.x + r.left}px`, top: `${f.y + r.top}px`, width: `${r.width}px`, height: `${r.height}px`, outlineWidth: `${1.5 / pan.k}px` });
-  hoverEl.dataset.ds = el.closest("[data-ds]")?.dataset.ds || "";
+  hoverEl.dataset.ds = hit.dsId;
   hoverEl.classList.add("on");
 });
 view.addEventListener("pointerup", () => {
@@ -101,8 +102,9 @@ addEventListener("resize", () => { placePop(); if (presenting >= 0) present(pres
 // ---------- live reload ----------
 function connect() {
   const es = new EventSource("/_api/events");
-  es.onopen = () => ($("#status").textContent = "");
-  es.onerror = () => ($("#status").textContent = "disconnected — is `canvas` still running?");
+  let lost = false; // changes made while disconnected weren't announced: on reconnecting, re-read everything
+  es.onopen = () => { $("#status").textContent = ""; if (lost) { lost = false; inlined.clear(); loadState(); } };
+  es.onerror = () => { lost = true; $("#status").textContent = "disconnected — is `canvas` still running?"; };
   es.onmessage = async (m) => {
     const ev = JSON.parse(m.data);
     if (ev.type === "app") { // the canvas app itself was updated (unsaved moves survive: they're stored)
@@ -117,10 +119,8 @@ function connect() {
     if (all.some((f) => !mine(f) && /(\.html|canvas\.json)$/.test(f)) || files.some((f) => f.includes("/") && /(\.html|canvas\.json)$/.test(f))) refreshPages();
     const top = files.filter((f) => !f.includes("/"));
     if (top.includes("comments.json")) await loadThreads();
-    const html = top.filter((f) => f.endsWith(".html"));
-    if (html.length || top.includes("canvas.json")) await loadState();
-    for (const f of html) if (frames.has(f)) requestReload(frames.get(f));
-    // shared assets (css, js, images, nested files) can affect every frame
-    if (files.some((f) => !f.endsWith(".json") && !(f.endsWith(".html") && !f.includes("/")))) for (const f of frames.values()) requestReload(f);
+    // Anything else can change how screens look (a screen, a stylesheet, an image, data, a component). The state's
+    // versions say which screens: re-keying them drops their pictures and reloads the live ones (see rekey).
+    if (all.some((f) => !/(^|\/)comments\.json$/.test(f))) await loadState();
   };
 }
