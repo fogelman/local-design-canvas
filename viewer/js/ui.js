@@ -6,6 +6,7 @@ function setTool(t) {
   document.querySelectorAll("[data-tool]").forEach((b) => b.classList.toggle("on", b.dataset.tool === t));
   if (t !== "comment") hoverEl.classList.remove("on");
   if (t === "interact") select(null);
+  scheduleCull(); // interacting needs live screens even zoomed out
 }
 $("#left").addEventListener("click", (e) => { const b = e.target.closest("[data-tool]"); if (b) setTool(b.dataset.tool); });
 

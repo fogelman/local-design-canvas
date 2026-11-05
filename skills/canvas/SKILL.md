@@ -5,7 +5,7 @@ description: Offline design canvas, where each *.html file in a folder is a live
 
 # Canvas
 
-Canvas files belong to the project you're working in: create the canvas folder inside that repo (e.g. `docs/<topic>/canvas/`) and manage its files there. The canvas tool is only the server. Start a new canvas with `canvas create <dir>` (it makes the folder), and serve one with `canvas open <dir>` at http://127.0.0.1:4747. `open` never creates folders: if it says there's no canvas, check the path before creating one. Every top-level `*.html` file is a live frame, and the viewer reloads it when the file changes. The user pins comments onto elements in the viewer.
+Canvas files belong to the project you're working in: create the canvas folder inside that repo (e.g. `docs/<topic>/canvas/`) and manage its files there. The canvas tool is only the server. Start a new canvas with `canvas create <dir>` (it makes the folder), and serve one with `canvas open <dir>` at http://localhost:4747. `open` never creates folders: if it says there's no canvas, check the path before creating one. Every top-level `*.html` file is a live frame, and the viewer reloads it when the file changes. The user pins comments onto elements in the viewer.
 
 ## Answering comments (the main loop)
 
@@ -13,9 +13,11 @@ Canvas files belong to the project you're working in: create the canvas folder i
    `c4 login.html › main > form.card > button.primary "Continue"` and then the messages.
    Leave the other threads alone: people use them for notes to each other. `--open` lists every open thread, but only use it if the user asks.
    Do not read `comments.json` directly. The command output is the cheap view.
+   A message can carry images (a screenshot, a reference, a sketch). Each prints under it as `image: <absolute path>`: Read those files, since the comment is often about what they show.
 2. Open only the file the thread names. If the selector is `[data-cid="c7"]`, grep `data-cid="c7"` in that file, because it marks the exact element. Otherwise grep the quoted text. Keep `data-cid` attributes when you edit: they anchor the comment pins.
 3. Make the change. Only when the comment is about how something looks (spacing, alignment, visual weight, "looks off"), run `canvas shot <id> --dir <dir>` before and/or after. It writes a PNG of that thread's frame, which you then Read. Skip it for copy, structure and data changes, because the image costs far more tokens than the text.
 4. Run `canvas reply <id> "<one line: what changed>" --resolve --dir <dir>`. Leave `--resolve` off if you have a question instead of a fix.
+   To show something (for example the PNG from `canvas shot` after a visual change), add `--image <file>`; it can be repeated. Images cost the person nothing to look at, so attach one when it says more than the line.
    Handle several threads in a row, with one reply each.
    Threads on other pages print as `checkout/c2`. Pass that id as is, and the frame lives in `<dir>/checkout/`.
 

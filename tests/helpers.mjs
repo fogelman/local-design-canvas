@@ -37,7 +37,7 @@ export function startServer(dir, opts = {}) {
     const timer = setTimeout(() => { child.kill(); reject(new Error(`server did not start: ${out}`)); }, 5000);
     child.stdout.on("data", (d) => {
       out += d;
-      const m = out.match(/http:\/\/127\.0\.0\.1:\d+\//);
+      const m = out.match(/http:\/\/localhost:\d+\//);
       if (m) { clearTimeout(timer); resolve({ url: m[0], pid: child.pid, stop: () => child.kill() }); }
     });
     child.on("exit", (code) => { clearTimeout(timer); reject(new Error(`server exited ${code}: ${out}`)); });

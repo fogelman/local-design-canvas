@@ -3,7 +3,8 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { canvas, cleanup, makeCanvas, page, sleep, startServer } from "../helpers.mjs";
+import { spawn } from "node:child_process";
+import { ROOT, canvas, cleanup, makeCanvas, page, sleep, startServer } from "../helpers.mjs";
 
 test("create makes the folder and canvas.json, and refuses an existing canvas", () => {
   const root = makeCanvas();
@@ -58,4 +59,41 @@ test("list shows running servers with comments waiting, and forgets them when th
     assert.equal(canvas(["list"], { env }).out, "no canvases open");
     assert.deepEqual(fs.readdirSync(path.join(runtime, "local-design-canvas")), []);
   } finally { sa?.stop(); sb?.stop(); for (const d of [runtime, a, b]) cleanup(d); }
+});
+
+test("open restarts its server on the same port when the canvas tool is updated, and never leaves one orphaned", async () => {
+  // a copy of the tool, so the test can "update" it
+  const tool = makeCanvas(), runtime = makeCanvas(), env = { XDG_RUNTIME_DIR: runtime };
+  const dir = makeCanvas({ "a.html": page("A") });
+  fs.cpSync(path.join(ROOT, "src"), path.join(tool, "src"), { recursive: true });
+  fs.cpSync(path.join(ROOT, "viewer"), path.join(tool, "viewer"), { recursive: true });
+  fs.copyFileSync(path.join(ROOT, "package.json"), path.join(tool, "package.json"));
+  const entries = () => JSON.parse(canvas(["list", "--json"], { env }).out || "[]");
+  const child = spawn(process.execPath, [path.join(tool, "src", "cli.mjs"), "open", dir, "--no-open", "--port", "0"], { stdio: ["ignore", "pipe", "pipe"], env: { ...process.env, ...env } });
+  let out = "";
+  child.stdout.on("data", (d) => (out += d));
+  try {
+    for (let i = 0; i < 50 && !/localhost:\d+/.test(out); i++) await sleep(100);
+    const url = out.match(/http:\/\/localhost:\d+\//)[0];
+    for (let i = 0; i < 30 && !entries().length; i++) await sleep(100);
+    const [before] = entries();
+    assert.equal(before.url, url);
+
+    // an update to the tool: the server answers a new route only after a restart
+    const server = path.join(tool, "src", "server.mjs");
+    fs.writeFileSync(server, fs.readFileSync(server, "utf8").replace(`if (p === "/_api/me")`, `if (p === "/_api/updated") return json({ ok: true });\n      if (p === "/_api/me")`));
+    let r = null;
+    for (let i = 0; i < 60; i++) { await sleep(100); r = await fetch(url + "_api/updated").then((x) => x.json()).catch(() => null); if (r?.ok) break; }
+    assert.deepEqual(r, { ok: true }, "the new code answers, on the same port");
+    const after = entries();
+    assert.equal(after.length, 1);
+    assert.equal(after[0].url, url);
+    assert.notEqual(after[0].pid, before.pid, "a new server process");
+
+    // the `canvas open` process killed outright: its server goes too
+    child.kill("SIGKILL");
+    for (let i = 0; i < 50 && entries().length; i++) await sleep(100);
+    assert.deepEqual(entries(), []);
+    assert.equal(await fetch(url + "_api/me").then(() => "up", () => "down"), "down");
+  } finally { child.kill("SIGKILL"); for (const d of [tool, runtime, dir]) cleanup(d); }
 });

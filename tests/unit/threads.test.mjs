@@ -2,7 +2,7 @@ import { test } from "node:test";
 import assert from "node:assert/strict";
 import fs from "node:fs";
 import path from "node:path";
-import { addThread, updateThread, waiting, claimed, queued, claim, splitId, waitForQueue } from "../../src/threads.mjs";
+import { addThread, answer, updateThread, waiting, claimed, queued, claim, splitId, waitForQueue } from "../../src/threads.mjs";
 import { pages, pageDir, state, threadsOf } from "../../src/store.mjs";
 import { findCanvases, sessionNote } from "../../src/hook.mjs";
 import { makeCanvas, cleanup, page } from "../helpers.mjs";
@@ -47,6 +47,44 @@ test("the Claude queue: waiting, claims, replies and expiry", () => {
     assert.equal(queued(dir).length, 1, "an abandoned claim (30 min+) queues again");
     updateThread(dir, "c1", (t) => { t.msgs.push({ by: "Claude", body: "done" }); delete t.working; });
     assert.ok(!waiting(threadsOf(dir).threads[0]), "Claude's reply ends the wait");
+  } finally { cleanup(dir); }
+});
+
+test("a reply sent while Claude works on the thread stays queued after Claude answers", () => {
+  const dir = makeCanvas({ "a.html": page("A") });
+  try {
+    addThread(dir, { frame: "a.html", body: "make it blue", claude: true });
+    claim(dir, queued(dir));
+    // the person adds to the thread while Claude is still working on it (what the server's reply route does)
+    updateThread(dir, "c1", (t) => { t.msgs.push({ by: "Ana", body: "and bigger", claude: true }); delete t.working; t.status = "open"; });
+    let newer;
+    updateThread(dir, "c1", (t) => { newer = answer(t, { by: "Claude", body: "made it blue" }, true); });
+    const t = threadsOf(dir).threads[0];
+    assert.deepEqual(t.msgs.map((m) => m.body), ["make it blue", "made it blue", "and bigger"], "the answer goes before what Claude hadn't seen");
+    assert.deepEqual(newer.map((m) => m.body), ["and bigger"]);
+    assert.equal(t.status, "open", "not resolved over the newer request");
+    assert.deepEqual(queued(dir).map((x) => x.id), ["c1"], "the newer message is still waiting on Claude");
+    claim(dir, queued(dir));
+    updateThread(dir, "c1", (t) => { newer = answer(t, { by: "Claude", body: "and bigger" }, true); });
+    assert.deepEqual(newer, []);
+    assert.equal(threadsOf(dir).threads[0].status, "resolved");
+    assert.equal(queued(dir).length, 0);
+  } finally { cleanup(dir); }
+});
+
+test("two sessions that read the queue at the same time: only the first claim gets the threads", () => {
+  const dir = makeCanvas({ "a.html": page("A") });
+  try {
+    addThread(dir, { frame: "a.html", body: "one", claude: true });
+    addThread(dir, { frame: "a.html", body: "two", claude: true });
+    const seenByA = queued(dir), seenByB = queued(dir); // both looked before either claimed
+    assert.deepEqual(claim(dir, seenByA).map((t) => t.id), ["c1", "c2"]);
+    assert.deepEqual(claim(dir, seenByB), [], "B's view was stale: the threads are A's now");
+    updateThread(dir, "c2", (t) => t.msgs.push({ by: "Ana", body: "and three", claude: true }));
+    updateThread(dir, "c2", (t) => { delete t.working; });
+    const [again] = claim(dir, seenByB);
+    assert.equal(again.id, "c2");
+    assert.equal(again.msgs.at(-1).body, "and three", "a claim hands over the thread as it is now, not as it was read");
   } finally { cleanup(dir); }
 });
 

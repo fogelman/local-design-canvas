@@ -2,6 +2,8 @@
 
 **An offline design canvas for [Claude Code](https://claude.com/claude-code).** Every HTML file in a folder becomes a live screen on a pan-and-zoom canvas. You pin comments on any element, tick **Send to Claude**, and Claude edits the screen and replies in the thread.
 
+Tired of big design pages that freeze, break or run out of memory? Here the design experience stays smooth however many screens you have, and Claude spends far fewer tokens: it reads only the open comments and changes only the screen each one is about.
+
 ![The canvas: desktop and mobile screens with comment pins](assets/canvas.png)
 
 - **Your files, offline.** Screens are plain HTML in your repo. No account, no cloud, no build step, no dependencies.
@@ -37,7 +39,7 @@ Then, in a Claude Code session inside your project:
 
 ![A comment sent to Claude, queued in the comments panel](assets/comments.png)
 
-1. Press **C** and click any element of a screen. Write your comment and keep **Send to Claude** checked. Unchecked comments are notes between people; Claude ignores them.
+1. Press **C** and click any element of a screen. Write your comment and keep **Send to Claude** checked. To show what you mean, paste, drop or attach (📎) images: a screenshot, a reference, a sketch. Claude opens them. Unchecked comments are notes between people; Claude ignores them.
 2. Claude runs `canvas comments` and gets a few lines per thread: the file, the exact element and your message.
 3. Claude edits that one file. The screen reloads in your browser, keeping your scroll position and anything you're typing.
 4. Claude replies in the thread and resolves it, or asks you a question. Not happy with the result? Reply in the thread. Replying reopens a resolved thread, and with **Send to Claude** checked it goes back to Claude.
@@ -79,7 +81,7 @@ Start the file with a one-line `<!-- usage -->` comment, so `canvas ds` can list
 | `canvas list` | Canvases being served right now, with their URL and folder (`--json` for scripts) |
 | `canvas new <name> [WxH]` | Create a screen (for example `canvas new inbox-mobile 390x844`) |
 | `canvas comments [--open\|--all]` | Threads waiting for Claude (default), all open threads, or everything |
-| `canvas reply <id> "text" [--resolve]` | Answer a thread |
+| `canvas reply <id> "text" [--image f.png] [--resolve]` | Answer a thread, optionally with images |
 | `canvas resolve <id>` · `canvas reopen <id>` | Close or reopen a thread |
 | `canvas watch on\|off` | Should Claude answer comments as they arrive? |
 | `canvas wait` | Wait until comments are sent to Claude, then print them (Claude runs this in the background) |
@@ -123,7 +125,7 @@ The canvas tool is only the server, the viewer and the command line. The files b
 
 ## Performance
 
-Only the screens near your view run as live pages, at most 12. The rest show a picture that matches the live page, or diagonal stripes until it's ready. A screen whose current state a picture can't hold (scrolled, an open modal, video or canvas) keeps the stripes rather than show something different. After 15 seconds in a hidden tab, the canvas releases everything and reloads what's in view when you come back. Hundreds of screens on one page stay smooth.
+Only the screens near your view run as live pages, at most 12, and zoomed out below 50% a screen stays a picture. Pictures match the live page exactly and are saved in the browser, so reopening a page shows them all at once. Until a screen has one it shows diagonal stripes, and when the screen or anything it uses changes (a stylesheet, an image, data, a component), its picture gives way to stripes at once until a picture of the new version is ready. A picture is taken only once the page has finished drawing. A screen whose current state a picture can't hold (scrolled, an open modal, video or canvas) keeps the stripes rather than show something different. While you pan or zoom nothing loads or renders: that waits until the view is still. After 15 seconds in a hidden tab, the canvas releases everything and reloads what's in view when you come back. Hundreds of screens on one page stay smooth.
 
 ## Contributing
 

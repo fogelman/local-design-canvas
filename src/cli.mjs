@@ -3,10 +3,11 @@
 import fs from "node:fs";
 import path from "node:path";
 import { LAYOUT, pageDir, readJSON, writeJSON } from "./store.mjs";
-import { allThreads, claim, claimed, now, queued, splitId, updateThread, waitForQueue, waiting } from "./threads.mjs";
+import { allThreads, answer, message, saveImage, claim, claimed, now, queued, splitId, updateThread, waitForQueue, waiting } from "./threads.mjs";
 import { listComponents } from "./components.mjs";
 import { sessionNote } from "./hook.mjs";
 import { serve } from "./server.mjs";
+import { supervise } from "./supervisor.mjs";
 import { running } from "./registry.mjs";
 import { shot } from "./shot.mjs";
 // ---------- cli ----------
@@ -38,7 +39,10 @@ function printThreads(dir, mode, given) {
     if (source && !noted.has(t.page)) { noted.add(t.page); console.log(`# ${t.page || "page 1"}: ${source}`); }
     const where = [t.frame ? pre + t.frame : `${pre || "page 1 "}canvas (${t.x},${t.y})`, t.ds ? `⟨${t.ds}⟩` : t.sel].filter(Boolean).join(" › ");
     console.log(`${pre}${t.id}${mode === "all" ? ` [${t.status}]` : claimed(t) && !given ? " [working]" : ""} ${where}${t.text ? ` "${t.text}"` : ""}`);
-    for (const m of t.msgs) console.log(`  ${m.by}${m.claude ? " @Claude" : ""}: ${m.body.replace(/\n/g, "\n    ")}`);
+    for (const m of t.msgs) {
+      console.log(`  ${m.by}${m.claude ? " @Claude" : ""}: ${m.body.replace(/\n/g, "\n    ")}`);
+      for (const img of m.images || []) console.log(`    image: ${path.join(pageDir(dir, t.page), img)}`); // absolute, to Read
+    }
   }
 }
 
@@ -62,7 +66,7 @@ const HELP = `canvas — offline design canvas with comment threads
   canvas hook session-start             (plugin hook) print canvases in the project with comments waiting for Claude
   canvas ds [--dir d]                   list the project's components (<dir>/_ds/components) with their usage
   canvas wait [--settle 8] [--timeout s] [--dir d]   block until comments are queued for Claude, claim and print them
-  canvas reply <id> <text> [--resolve] [--by name] [--dir d]
+  canvas reply <id> <text> [--image f.png]… [--resolve] [--by name] [--dir d]   (images: png, jpg, gif, webp)
   canvas shot <frame|id> [--out f.png] [--scale 2] [--dir d]   PNG of one frame (or a thread's frame)
   canvas resolve <id> [--dir d]         mark thread resolved
   canvas reopen <id> [--dir d]
@@ -121,9 +125,14 @@ else if (cmd === "list" || cmd === "ls") {
 } else if (cmd === "wait") {
   const dir = dirOf(dirFlag);
   const settle = +(flag(args, "--settle") || 8) * 1000, timeout = +(flag(args, "--timeout") || 0) * 1000;
-  const list = await waitForQueue(dir, settle, timeout);
+  let list = [];
+  const end = timeout && Date.now() + timeout;
+  while (!list.length) { // another session may claim the batch first: then keep waiting
+    const left = end ? end - Date.now() : 0;
+    if (end && left <= 0) break;
+    list = claim(dir, await waitForQueue(dir, settle, left));
+  }
   if (!list.length) { console.log("no comments (timed out)"); process.exit(2); }
-  claim(dir, list);
   printThreads(dir, "claude", list);
   const shown = path.relative(process.cwd(), dir) || ".";
   const where = shown.startsWith("..") ? dir : shown; // relative only when it stays inside the cwd
@@ -131,11 +140,17 @@ else if (cmd === "list" || cmd === "ls") {
 } else if (cmd === "reply") {
   const resolve = flag(args, "--resolve");
   const by = flag(args, "--by");
+  const files = [];
+  for (let f; (f = flag(args, "--image")) !== undefined;) files.push(f);
   const [, id, ...text] = args;
-  if (!id || !text.length) { console.error("usage: canvas reply <id> <text> [--resolve]"); process.exit(1); }
+  if (!id || (!text.length && !files.length) || files.some((f) => f === true)) { console.error("usage: canvas reply <id> <text> [--image file.png]… [--resolve]"); process.exit(1); }
   const [pd, tid] = splitId(dirOf(dirFlag), id);
-  updateThread(pd, tid, (t) => { t.msgs.push({ by: by || "Claude", at: now(), body: text.join(" ") }); delete t.working; if (resolve) t.status = "resolved"; });
-  console.log(`${id} replied${resolve ? " + resolved" : ""}`);
+  const images = files.map((f) => { try { return saveImage(pd, fs.readFileSync(f)); } catch (e) { console.error(`${f}: ${e.message}`); process.exit(1); } });
+  let newer = [];
+  const t = updateThread(pd, tid, (t) => { newer = answer(t, message(pd, { by: by || "Claude", body: text.join(" "), images }), resolve); });
+  const again = newer.some((m) => m.claude);
+  console.log(`${id} replied${resolve && t.status === "resolved" ? " + resolved" : ""}`);
+  if (newer.length) console.log(`\n${newer.length} newer message(s) arrived while you worked${again ? ", so the thread is queued again (not resolved)" : ""}:\n${newer.map((m) => `  ${m.by}: ${m.body}`).join("\n")}`);
 } else if (cmd === "shot") {
   const out = flag(args, "--out"), scale = flag(args, "--scale") || 1;
   if (!args[1]) { console.error("usage: canvas shot <frame|thread-id> [--out file.png] [--scale 2]"); process.exit(1); }
@@ -164,5 +179,6 @@ else if (cmd === "list" || cmd === "ls") {
     console.error(`no canvas folder at ${dir}${hint}\n  create one with: canvas create ${target}`);
     process.exit(1);
   }
-  serve(dir, port);
+  if (process.env.CANVAS_WORKER) { serve(dir, port); process.on("disconnect", () => process.exit(0)); } // the server, under `canvas open`
+  else supervise(dir, port, !process.argv.includes("--no-open"));
 }

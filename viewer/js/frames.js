@@ -5,7 +5,9 @@ function renderSections(list = []) {
 }
 
 // ---------- frames ----------
+const restoring = [];
 function renderFrames(list) {
+  const opening = frames.size === 0; // the page is opening (not a screen added later)
   const seen = new Set();
   for (const f of list) {
     seen.add(f.file);
@@ -18,16 +20,69 @@ function renderFrames(list) {
         <div class="box"><div class="ph"></div><div class="shield"></div></div>
         <div class="grip"></div><div class="size"></div>`;
       framesEl.appendChild(el);
-      cur = { el, iframe: null };
+      cur = { el, iframe: null, store: storeUrl(f.file) };
       frames.set(f.file, cur);
     }
     cur.base = { x: f.x, y: f.y, w: f.w, h: f.h };
     Object.assign(cur, f, dirty.get(f.file)); // unsaved local moves survive a refresh from disk
-    placeFrame(cur);
+    const first = !cur.key;
+    placeFrame(cur); // and re-keys it
+    if (first && opening) restoring.push(cur.restored);
+  }
+  // Screens appear together once their saved pictures are ready (a moment), not as stripes that then fill in.
+  if (restoring.length) {
+    framesEl.classList.add("pending");
+    const all = Promise.race([Promise.all(restoring), new Promise((r) => setTimeout(r, 800))]);
+    restoring.length = 0;
+    all.then(() => framesEl.classList.remove("pending"));
   }
   for (const [file, cur] of frames) if (!seen.has(file)) { cur.el.remove(); frames.delete(file); }
   scheduleCull();
   queueSnaps();
+}
+
+// ---------- what a screen looks like ----------
+// A screen's key says what it looks like: its file, every shared file it can pull in, the canvas app (the server's
+// versions), and its size. A picture is shown only under the key it was taken at. When the key changes the picture
+// goes at once, and the frame shows stripes until a new one is ready: never a picture of what the screen no longer
+// is. A live screen whose files changed reloads (or, while the person is busy, gets the amber "stale" mark).
+const looks = (f) => `${f.v}|${ASSETS}`;
+function rekey(f) {
+  const key = `${looks(f)}|${f.w}x${f.h}`;
+  if (f.key === key) return;
+  const was = f.key, sameFiles = !!was && was.startsWith(`${looks(f)}|`);
+  f.key = key;
+  if (was) {
+    f.snapSeq = (f.snapSeq || 0) + 1; // a picture still rendering is of the old screen
+    f.snapped = false; f.snapStale = false; f.zones = null;
+    setSnap(f, null);
+    if (f.iframe && !sameFiles) requestReload(f); // a new size alone needs no reload: the live page reflows
+  }
+  if (!sameFiles) f.restored = restoreSnap(f); // the browser may hold a picture under the new key already
+}
+// A page can keep changing after it loads: an entrance animation, data a script fills in, a font arriving. A picture
+// to keep waits until the page has been still for STILL_MS: no DOM change, no finite animation running, fonts in,
+// and nothing pending (timers and requests, counted by the script the server adds to every screen).
+// A page that doesn't settle within SETTLE_MAX_MS resolves false: it isn't pictured rather than caught half-drawn.
+const STILL_MS = 300, SETTLE_MAX_MS = 4000;
+function settled(doc) {
+  return new Promise((resolve) => {
+    const start = performance.now();
+    let last = start, mo = null;
+    const finish = (ok) => { mo?.disconnect(); resolve(ok); };
+    try { mo = new MutationObserver(() => (last = performance.now())); mo.observe(doc, { subtree: true, childList: true, attributes: true, characterData: true }); } catch { return finish(false); }
+    const tick = () => {
+      if (!doc.defaultView) return finish(false); // closed meanwhile
+      let busy = doc.fonts?.status === "loading" || doc.defaultView.__canvasPending?.() > 0; // timers and requests (see the server's PENDING)
+      try { busy ||= doc.getAnimations().some((a) => a.playState === "running" && a.effect?.getComputedTiming().endTime !== Infinity); } catch {}
+      const now = performance.now();
+      if (busy) last = now;
+      if (now - last >= STILL_MS) return finish(true);
+      if (now - start > SETTLE_MAX_MS) return finish(false);
+      setTimeout(tick, 50);
+    };
+    setTimeout(tick, 50);
+  });
 }
 
 // ---------- snapshots ----------
@@ -110,9 +165,10 @@ function capture(doc, f) {
   });
   root.querySelectorAll("script, link, style, noscript").forEach((n) => n.remove());
   root.setAttribute("data-snap-root", "");
+  const zones = zonesOf(doc); // read now, while the page is here
   // the live page's own scrollbars take room from the layout: the root element carries them in the picture
   if (barX || barY) Object.assign(root.style, { width: `${f.w}px`, height: `${f.h}px`, overflowX: barX ? "scroll" : "hidden", overflowY: barY ? "scroll" : "hidden" });
-  return { root, sheets, images, base: doc.baseURI, w: f.w, h: f.h };
+  return { root, sheets, images, base: doc.baseURI, w: f.w, h: f.h, zones };
 }
 // Asynchronous part: inline files, render, rasterize.
 async function render({ root, sheets, images, base, w, h }) {
@@ -134,61 +190,137 @@ async function render({ root, sheets, images, base, w, h }) {
   (root.querySelector("head") || root).appendChild(style);
   const xhtml = new XMLSerializer().serializeToString(root);
   const svg = `<svg xmlns="http://www.w3.org/2000/svg" width="${w}" height="${h}"><foreignObject x="0" y="0" width="${w}" height="${h}">${xhtml}</foreignObject></svg>`;
-  // loaded from a data: URL, not a blob: one, so the browser lets it be drawn to a canvas and kept as a bitmap,
+  // loaded from a data: URL, not a blob: one, so the browser lets it be drawn to a canvas and kept as an image,
   // which is far lighter to keep and paint than an SVG carrying its own fonts; where that's refused, keep the SVG
   const img = new Image();
   img.src = `data:image/svg+xml;charset=utf-8,${encodeURIComponent(svg)}`;
+  await quiet(); // drawing a heavy page takes the main thread for a moment: never while the view moves
   try { await img.decode(); } catch { throw new Unsnappable("render failed"); }
+  await quiet();
   try {
     const s = Math.min(Math.max(devicePixelRatio, 1), 2, 16384 / Math.max(w, h), Math.sqrt(32e6 / (w * h)));
     const c = document.createElement("canvas");
     c.width = Math.round(w * s); c.height = Math.round(h * s);
     c.getContext("2d").drawImage(img, 0, 0, c.width, c.height);
-    const png = await new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej()), "image/png"));
-    return URL.createObjectURL(png);
-  } catch { return URL.createObjectURL(new Blob([svg], { type: "image/svg+xml" })); }
+    // lossless WebP: the same pixels as PNG at about half the size, and much faster to encode
+    // (grainy backgrounds barely compress); a browser that can't encode it gives a PNG
+    const bmp = await new Promise((res, rej) => c.toBlob((b) => (b ? res(b) : rej()), "image/webp", 1));
+    return { url: URL.createObjectURL(bmp), blob: bmp };
+  } catch { const blob = new Blob([svg], { type: "image/svg+xml" }); return { url: URL.createObjectURL(blob), blob }; }
 }
-function setSnap(f, url) {
-  if (f.snapUrl) URL.revokeObjectURL(f.snapUrl);
+// `key`: the picture shows the screen exactly as its files are (not a state someone left it in)
+// A new picture replaces the old one only once it's decoded, so the screen never shows an empty image in between.
+// Resolves when it's on screen.
+function setSnap(f, url, key = null) {
   f.snapUrl = url;
+  f.snapKey = url ? key : null;
   const ph = f.el.querySelector(".ph");
-  ph.innerHTML = url ? `<img src="${url}" alt="" draggable="false">` : "";
-  ph.classList.toggle("has-img", !!url);
+  const show = () => {
+    if (f.shownUrl && f.shownUrl !== url) URL.revokeObjectURL(f.shownUrl);
+    f.shownUrl = url;
+    ph.classList.toggle("has-img", !!url);
+  };
+  if (!url) { ph.replaceChildren(); show(); return Promise.resolve(); }
+  const img = new Image();
+  img.alt = ""; img.draggable = false; img.src = url;
+  return img.decode().catch(() => {}).then(() => {
+    if (f.snapUrl !== url) return URL.revokeObjectURL(url); // a newer picture (or none) took its place meanwhile
+    ph.replaceChildren(img);
+    show();
+  });
 }
-async function snap(f, doc) {
-  if (!doc?.documentElement || !doc.defaultView) return;
-  const seq = f.snapSeq = (f.snapSeq || 0) + 1; // a newer snapshot (or a release) wins over this one
+// `fresh`: the page as it loads, untouched, so the picture can be saved for the next visit.
+// `docKey`: the key the page was loaded under. A page loaded before its files changed isn't pictured: the frame was
+// re-keyed (stripes) and the queue pictures the new version.
+async function snap(f, doc, fresh, docKey) {
+  if (!doc?.documentElement || !doc.defaultView || docKey !== f.key) return;
+  // half-loaded (panned away or reloaded mid-load): its stylesheets may not be in yet, so the queue pictures it fresh
+  if (doc.readyState !== "complete") { f.snapStale = true; return; }
+  const seq = f.snapSeq = (f.snapSeq || 0) + 1; // a newer snapshot, a release or a re-key wins over this one
+  const key = docKey;
   f.snapStale = false;
   f.snapped = true; // tried: a page that can't be pictured isn't retried until it changes
   try {
-    const url = await render(capture(doc, f));
+    const cap = capture(doc, f);
+    const { url, blob } = await render(cap);
     if (seq !== f.snapSeq || released) return URL.revokeObjectURL(url);
-    setSnap(f, url);
+    if (fresh) saveSnap(f, blob, key, cap.zones);
+    f.zones = cap.zones;
+    await setSnap(f, url, fresh && key === f.key ? key : null);
   } catch (e) {
     if (seq !== f.snapSeq) return;
     setSnap(f, null); // stripes, never a picture that differs from the page
     if (!(e instanceof Unsnappable) && e?.name !== "SecurityError") console.warn("snapshot failed", f.file, e);
   }
 }
-// one hidden iframe at a time renders frames that have no (or a stale) snapshot
+// Saved snapshots: kept in the browser per canvas, page and screen with the key they were taken at, so
+// reopening a page (or coming back to a released tab) shows every picture at once without rendering anything.
+const SNAP_STORE = "canvas-snapshots-v3";
+const storeUrl = (file) => `/_snapshots/${encodeURIComponent(PAGE)}/${encodeURIComponent(file)}`;
+const snapStore = () => (window.caches && CANVAS_ID ? caches.open(`${SNAP_STORE}:${CANVAS_ID}`) : Promise.reject());
+function saveSnap(f, blob, key, zones) {
+  snapStore().then((c) => Promise.all([
+    c.put(f.store, new Response(blob, { headers: { "content-type": blob.type, "x-key": key } })),
+    c.put(`${f.store}?zones`, new Response(JSON.stringify(zones), { headers: { "content-type": "application/json", "x-key": key } })),
+  ])).catch(() => {});
+}
+async function restoreSnap(f) {
+  const key = f.key;
+  f.restoring = true;
+  try {
+    const store = await snapStore();
+    const [r, z] = await Promise.all([store.match(f.store), store.match(`${f.store}?zones`)]);
+    if (r?.headers.get("x-key") !== key) return;
+    const [blob, zones] = await Promise.all([r.blob(), z?.headers.get("x-key") === key ? z.json().catch(() => null) : null]);
+    if (f.key !== key || released || (f.snapUrl && f.snapKey === key)) return;
+    f.snapSeq = (f.snapSeq || 0) + 1;
+    f.zones = zones;
+    f.snapped = true; f.snapStale = false;
+    await setSnap(f, URL.createObjectURL(blob), key);
+  } catch {} finally { f.restoring = false; queueSnaps(); }
+}
+// one hidden iframe at a time renders frames that have no (or a stale) snapshot, nearest first, in idle moments
 let snapping = false;
 function queueSnaps() {
-  if (snapping || released || document.hidden) return; // no background work in a hidden tab
-  const a = toWorld(innerWidth / 2, innerHeight / 2);
-  const next = [...frames.values()].filter((f) => !f.iframe && (!f.snapped || f.snapStale))
-    .sort((p, q) => Math.hypot(p.x - a.x, p.y - a.y) - Math.hypot(q.x - a.x, q.y - a.y))[0];
-  if (!next) return;
+  if (snapping || released || document.hidden || moving) return; // no background work in a hidden tab or a moving view
+  if (![...frames.values()].some((f) => !f.iframe && !f.restoring && (!f.snapped || f.snapStale))) return;
   snapping = true;
+  idle(() => {
+    snapping = false;
+    if (released || document.hidden || moving) return; // settle() and visibilitychange start it again
+    const a = toWorld(innerWidth / 2, innerHeight / 2);
+    const next = [...frames.values()].filter((f) => !f.iframe && !f.restoring && (!f.snapped || f.snapStale))
+      .sort((p, q) => Math.hypot(p.x - a.x, p.y - a.y) - Math.hypot(q.x - a.x, q.y - a.y))[0];
+    if (next) { snapping = true; snapIn(next); }
+  });
+}
+// The person comes first: if the view starts moving while the page is still loading, the load is dropped (the frame
+// goes back in the queue). Once captured, the page is closed right away; drawing the picture waits for a still view.
+let dropSnapIn = null;
+function snapIn(next) {
   const ifr = document.createElement("iframe");
   ifr.className = "snapper";
   Object.assign(ifr.style, { width: `${next.w}px`, height: `${next.h}px` });
   let finished = false;
-  const done = () => { if (finished) return; finished = true; clearTimeout(guard); ifr.remove(); snapping = false; setTimeout(queueSnaps, 30); };
-  const guard = setTimeout(() => { next.snapStale = false; next.snapped = true; done(); }, 8000);
-  ifr.addEventListener("load", () => setTimeout(async () => {
-    if (!next.iframe) { if (next.scroll) ifr.contentWindow.scrollTo(next.scroll.x, next.scroll.y); await snap(next, ifr.contentDocument); }
+  const done = () => { if (finished) return; finished = true; dropSnapIn = null; clearTimeout(guard); ifr.remove(); snapping = false; setTimeout(queueSnaps, 30); };
+  const key = next.key; // what it's loaded as; if the files change meanwhile, the picture isn't taken
+  const guard = setTimeout(() => { next.snapStale = false; next.snapped = true; done(); }, 8000 + SETTLE_MAX_MS);
+  dropSnapIn = done;
+  ifr.addEventListener("load", async () => {
+    const still = await settled(ifr.contentDocument);
+    if (finished) return; // dropped for the person meanwhile
+    dropSnapIn = null; // captured from here on: nothing left to drop
+    if (!next.iframe && next.key === key) {
+      if (!still) { next.snapped = true; next.snapStale = false; setSnap(next, null); } // never still: stripes
+      else {
+        if (next.scroll) ifr.contentWindow.scrollTo(next.scroll.x, next.scroll.y);
+        const work = snap(next, ifr.contentDocument, !next.scroll, key);
+        ifr.remove();
+        await work;
+      }
+    }
     done();
-  }, 250));
+  });
   ifr.src = src(next.file);
   document.body.appendChild(ifr);
 }
@@ -244,7 +376,7 @@ const RELEASE_MS = 15000;
 let released = false, releaseT = null;
 function releaseAll() {
   released = true;
-  clearTimeout(cullT);
+  clearTimeout(cullT); clearTimeout(graceT); cullQueued = false;
   document.querySelector(".snapper")?.remove();
   for (const f of frames.values()) {
     unmount(f, false);
@@ -259,60 +391,92 @@ document.addEventListener("visibilitychange", () => {
   if (document.hidden) { releaseT = setTimeout(releaseAll, RELEASE_MS); return; }
   if (!released) return queueSnaps();
   released = false;
-  cull();
-  queueSnaps();
+  for (const f of frames.values()) restoreSnap(f); // saved pictures come back at once; the rest refill in idle time
+  scheduleCull(0);
 });
 
 // ---------- virtualization ----------
-// Only frames near the viewport get a live iframe, capped at LIVE (nearest to the center first).
+// Only frames near the viewport get a live iframe, capped at LIVE (nearest to the center first). Zoomed out
+// (below LIVE_K), a screen whose picture shows it exactly stays a picture: a live page adds nothing there but cost.
 // Frames that leave the viewport are unloaded after HIDE_MS so quick pans don't thrash; their scroll is restored on return.
+// Loading and unloading pages is the heaviest thing the canvas does, so it never happens while the view moves,
+// and a still view does it a little at a time: at most two pages loading at once, one unload per idle moment.
 const LIVE = +new URLSearchParams(location.search).get("live") || 12;
-const HIDE_MS = 2500, MARGIN = 0.5, MIN_PX = 48;
-let cullT = null;
-function scheduleCull() { clearTimeout(cullT); cullT = setTimeout(cull, drag ? 250 : 120); }
+const HIDE_MS = 2500, MARGIN = 0.5, MIN_PX = 48, LIVE_K = 0.5;
+let cullT = null, graceT = null, cullQueued = false;
+function scheduleCull(delay = 60) {
+  if (cullQueued || moving || released) return; // settle() runs it once the view is still
+  cullQueued = true;
+  cullT = setTimeout(() => idle(() => { cullQueued = false; cull(); }), delay);
+}
+const exact = (f) => f.snapUrl && !f.snapStale && f.snapKey === f.key && !f.touched; // its picture is the page as it is
 function mount(f) {
   if (f.iframe) return;
+  f.el.classList.remove("loaded", "shown"); // the picture (or stripes) stays until the page has painted
+  f.el.classList.add("live");
+  load(f);
+}
+// Loads the screen in a new iframe on top of what's showing (its picture, or the page itself before a reload),
+// which is only removed once the new page has painted and faded in: a screen never blinks blank.
+function load(f) {
   const ifr = document.createElement("iframe");
   ifr.src = src(f.file);
-  ifr.addEventListener("load", () => onFrameLoad(f));
+  ifr.key = f.key; // the version this page is: pictures of it are only taken while that's still the screen's key
+  ifr.addEventListener("load", () => { if (f.iframe === ifr) onFrameLoad(f); });
   f.el.querySelector(".box").insertBefore(ifr, f.el.querySelector(".shield"));
   f.iframe = ifr;
-  f.el.classList.add("live");
-  f.el.classList.remove("loaded"); // stripes (or the snapshot) stay until the page has loaded
+  f.touched = false;
+}
+async function reveal(f, ifr) {
+  const win = ifr.contentWindow;
+  const wait = (ms) => new Promise((r) => setTimeout(r, ms));
+  try { await Promise.race([win.document.fonts.ready, wait(1500)]); } catch {}
+  await Promise.race([new Promise((r) => win.requestAnimationFrame(() => win.requestAnimationFrame(r))), wait(300)]); // painted
+  if (f.iframe !== ifr) return;
+  ifr.classList.add("ready");
+  f.el.classList.add("loaded");
+  await wait(170); // the fade
+  if (f.iframe !== ifr) return;
+  f.prev?.remove(); f.prev = null;
+  f.el.classList.add("shown");
 }
 function unmount(f, keepSnapshot = true) {
   if (!f.iframe) return;
+  f.prev?.remove(); f.prev = null;
   if (stale.delete(f.file)) { f.el.classList.remove("stale"); renderStale(); } // it loads fresh when it comes back
   try { const w = f.iframe.contentWindow; if (w.scrollX || w.scrollY) f.scroll = { x: w.scrollX, y: w.scrollY }; } catch {}
-  clearTimeout(f.snapT);
-  if (keepSnapshot) snap(f, docOf(f));
+  if (keepSnapshot && !exact(f)) snap(f, docOf(f), false, f.iframe.key); // keep what it showed (typed text, an opened menu)
   f.iframe.remove();
   f.iframe = null;
   f.hiddenSince = 0;
-  f.el.classList.remove("live", "loaded");
+  f.el.classList.remove("live", "loaded", "shown");
 }
 function cull() {
-  if (released) return;
+  if (released || moving) return;
   const mx = innerWidth * MARGIN / pan.k, my = innerHeight * MARGIN / pan.k;
   const a = toWorld(0, 0), b = toWorld(innerWidth, innerHeight);
   const cx = (a.x + b.x) / 2, cy = (a.y + b.y) / 2, now = Date.now();
   const wanted = [...frames.values()]
     .filter((f) => f.x < b.x + mx && f.x + f.w > a.x - mx && f.y < b.y + my && f.y + f.h > a.y - my && f.w * pan.k >= MIN_PX)
+    .filter((f) => pan.k >= LIVE_K || tool === "interact" || !exact(f))
     .map((f) => ({ f, d: Math.hypot(f.x + f.w / 2 - cx, f.y + f.h / 2 - cy) }))
     .sort((p, q) => p.d - q.d).slice(0, LIVE).map((p) => p.f);
-  const keep = new Set(wanted);
-  if (openThread) keep.add(frames.get(threads.find((t) => t.id === openThread)?.frame));
-  if (draft?.frame) keep.add(frames.get(draft.frame));
-  for (const f of keep) if (f) { f.hiddenSince = 0; mount(f); }
+  const keep = new Set([selected && frames.get(selected), openThread && frames.get(threads.find((t) => t.id === openThread)?.frame), draft?.frame && frames.get(draft.frame), ...wanted].filter(Boolean));
+  let loads = 2 - [...frames.values()].filter((f) => f.iframe && !f.el.classList.contains("loaded")).length;
+  for (const f of keep) { f.hiddenSince = 0; if (!f.iframe && loads-- > 0) mount(f); }
   const stale = [...frames.values()].filter((f) => f.iframe && !keep.has(f));
   for (const f of stale) f.hiddenSince ||= now;
-  // over budget: drop the longest-hidden at once; otherwise wait out the grace period
+  // over budget: drop the longest-hidden first; otherwise wait out the grace period. One per pass.
   const live = [...frames.values()].filter((f) => f.iframe).length;
-  stale.sort((p, q) => p.hiddenSince - q.hiddenSince).forEach((f, i) => {
-    if (i < live - (LIVE + 4) || now - f.hiddenSince > HIDE_MS) unmount(f);
-  });
-  if (stale.some((f) => f.iframe)) { clearTimeout(cullT); cullT = setTimeout(cull, HIDE_MS); }
+  stale.sort((p, q) => p.hiddenSince - q.hiddenSince);
+  const drop = stale.find((f, i) => i < live - (LIVE + 4) || now - f.hiddenSince > HIDE_MS);
+  if (drop) unmount(drop);
+  const more = (loads > 0 && [...keep].some((f) => !f.iframe)) || stale.some((f, i) => f.iframe && (i < live - (LIVE + 4) || now - f.hiddenSince > HIDE_MS));
+  clearTimeout(graceT);
+  if (more) scheduleCull(0);
+  else if (stale.some((f) => f.iframe)) graceT = setTimeout(scheduleCull, HIDE_MS);
   renderPins();
+  queueSnaps();
 }
 function placeFrame(f) {
   Object.assign(f.el.style, { left: `${f.x}px`, top: `${f.y}px`, width: `${f.w}px`, height: `${f.h}px` });
@@ -322,14 +486,16 @@ function placeFrame(f) {
   f.el.querySelector(".ph").dataset.t = f.title;
   f.el.querySelector(".size").textContent = `${f.w} × ${f.h}`;
   f.el.classList.toggle("sel", selected === f.file);
+  rekey(f);
 }
 function onFrameLoad(f) {
-  f.el.classList.add("loaded");
   const win = f.iframe.contentWindow;
+  reveal(f, f.iframe);
   if (f.scroll) { win.scrollTo(f.scroll.x, f.scroll.y); f.scroll = null; }
   win.addEventListener("scroll", renderPins, { passive: true });
   // keep the canvas shortcuts working while focus is inside a frame (interact mode)
   win.addEventListener("keydown", (e) => { if (e.key === "Escape") setTool("move"); });
+  for (const ev of ["pointerdown", "keydown", "input"]) win.addEventListener(ev, () => (f.touched = true), { capture: true, passive: true });
   // a link to another frame flies the canvas there instead of navigating inside this frame
   win.document.addEventListener("click", (e) => {
     const target = frameForHref(e.target.closest?.("a[href]")?.href);
@@ -338,9 +504,10 @@ function onFrameLoad(f) {
     select(target.file);
     fitRect(target, 2);
   }, true);
-  clearTimeout(f.snapT);
-  f.snapT = setTimeout(() => f.iframe && snap(f, docOf(f)), 400);
+  const ifr = f.iframe;
+  if (!exact(f)) settled(ifr.contentDocument).then((still) => { if (still && f.iframe === ifr && !f.touched) snap(f, docOf(f), true, ifr.key); });
   renderPins();
+  scheduleCull(); // the next page can load
 }
 // ---------- stale screens: don't reload under the person's hands ----------
 // While someone is writing a comment or using a live screen (interact mode), changes from disk don't reload the
@@ -350,7 +517,7 @@ const stale = new Set();
 let staleApp = false; // the viewer itself was updated: a full page reload is waiting
 function busy() {
   const ta = pop.hidden ? null : pop.querySelector("textarea");
-  return !!draft || !!(ta && ta.value.trim()) || tool === "interact";
+  return !!draft || !!(ta && ta.value.trim()) || attach.items.length > 0 || tool === "interact";
 }
 function requestReload(f) {
   if (f.iframe && busy()) { stale.add(f.file); f.el.classList.add("stale"); return renderStale(); }
@@ -372,11 +539,22 @@ function renderStale() {
 $("#staleBtn").addEventListener("click", applyStale);
 
 function reloadFrame(f) {
-  if (!f.iframe) { f.snapStale = true; return queueSnaps(); } // unloaded frames load fresh when they come back
-  try { const w = f.iframe.contentWindow; f.scroll = { x: w.scrollX, y: w.scrollY }; w.location.reload(); } catch { f.iframe.src = f.iframe.src; }
+  if (!f.iframe) { f.snapSeq = (f.snapSeq || 0) + 1; f.snapped = false; f.zones = null; setSnap(f, null); return queueSnaps(); } // stripes until pictured again
+  try { const w = f.iframe.contentWindow; f.scroll = { x: w.scrollX, y: w.scrollY }; } catch {}
+  f.prev?.remove();
+  f.prev = f.iframe.classList.contains("ready") ? f.iframe : (f.iframe.remove(), null); // stays on screen until the new one has painted
+  load(f);
 }
 function select(file) {
   selected = file;
   for (const f of frames.values()) f.el.classList.toggle("sel", selected === f.file);
+  if (file) focusFrame(frames.get(file));
+}
+// The screen someone focuses (selects, double-clicks, follows a link to) goes live right away, ahead of anything
+// queued; it stays live while selected.
+function focusFrame(f) {
+  if (!f || released) return;
+  f.hiddenSince = 0;
+  mount(f);
 }
 const docOf = (f) => { try { return f.iframe?.contentDocument || null; } catch { return null; } };
