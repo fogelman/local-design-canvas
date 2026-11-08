@@ -286,6 +286,8 @@ function renderPop() {
     if (keep.focused) { ta.focus(); ta.setSelectionRange(keep.start, keep.end); }
   }
   renderAttach();
+  chipIndent();
+  document.fonts?.ready.then(chipIndent); // its width can change once the font is in
   tickPop();
   placePop();
   if (!keep) requestAnimationFrame(() => pop.querySelector("textarea")?.focus()); // focus only when the box first opens
@@ -311,6 +313,13 @@ function renderAttach() {
   if (atBottom) msgs.scrollTop = msgs.scrollHeight;
   fieldState();
   placePop();
+}
+// The first line of the text starts after @Claude (when shown), so the text wraps under it, side to side.
+function chipIndent() {
+  const chip = pop.querySelector(".chip"), ta = pop.querySelector("textarea");
+  if (!ta) return;
+  ta.style.textIndent = toClaude && chip?.offsetWidth ? `${chip.offsetWidth + 5}px` : "0";
+  ta.style.height = "auto"; ta.style.height = `${ta.scrollHeight}px`;
 }
 // The field shows its options (Send to Claude, image, send) while in use: focused, or holding text or images.
 function fieldState() {
@@ -415,6 +424,7 @@ pop.addEventListener("change", (e) => {
   toClaude = e.target.checked;
   localStorage.setItem("canvas-to-claude", toClaude ? "1" : "0");
   pop.querySelector("form").classList.toggle("to-claude", toClaude);
+  chipIndent();
   if (draft) pop.querySelector("textarea").placeholder = placeholderOf({ draft: true });
   pop.querySelector("textarea").focus();
 });
