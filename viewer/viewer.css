@@ -84,6 +84,11 @@ body.hide-resolved .pin.resolved { display: none; }
 .menu hr { border: 0; border-top: 1px solid var(--pill-line); margin: 6px 4px; }
 #pageMenu { top: 50px; left: 10px; }
 #zoomMenu { top: 50px; right: 10px; }
+/* menus never run past the window: at most its height, the page list scrolls and "New page" stays at the bottom */
+.menu { max-height: calc(100vh - 60px); overflow-y: auto; }
+#pageMenu { display: flex; flex-direction: column; overflow: hidden; }
+#pageMenu > * { flex: none; }
+#pageMenu .pages { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 
 #status { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); color: var(--mid); }
 
