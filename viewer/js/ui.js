@@ -27,11 +27,15 @@ $("#zoomMenu").addEventListener("click", (e) => {
 
 const DOTS = `<svg viewBox="0 0 24 24" class="fill"><circle cx="6" cy="12" r="1.4"/><circle cx="12" cy="12" r="1.4"/><circle cx="18" cy="12" r="1.4"/></svg>`;
 function renderPageMenu() {
-  $("#pageMenu").innerHTML = PAGES.map((pg) => `<div class="row" data-page="${esc(pg.id)}">
+  const m = $("#pageMenu");
+  m.innerHTML = `<div class="pages">` + PAGES.map((pg) => `<div class="row" data-page="${esc(pg.id)}">
       <span class="nm">${esc(pg.name)}</span>
       ${pg.id === PAGE ? `<svg class="check" viewBox="0 0 24 24"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>` : ""}
       <button class="more" data-more="${esc(pg.id)}" title="More">${DOTS}</button></div>`).join("")
-    + `<hr><button data-new>New page</button>`;
+    + `</div><hr><button data-new>New page</button>`;
+  const list = m.querySelector(".pages");
+  list.onscroll = () => { $("#pageCtx").hidden = true; }; // its "…" menu is placed on the row, so it would float off it
+  m.querySelector(".row .check")?.closest(".row").scrollIntoView({ block: "nearest" });
 }
 async function refreshPages() {
   PAGES = (await api("/_api/state")).pages;
@@ -61,6 +65,7 @@ function openPageActions(btn) {
   const r = btn.getBoundingClientRect();
   Object.assign(m.style, { left: `${r.right - 8}px`, top: `${r.bottom + 4}px` });
   m.hidden = false;
+  if (m.getBoundingClientRect().bottom > innerHeight - 10) m.style.top = `${Math.max(10, r.top - 4 - m.offsetHeight)}px`; // near the bottom: open above the row
   m.onclick = async (e) => {
     const act = e.target.closest("[data-act]")?.dataset.act;
     if (!act) return;

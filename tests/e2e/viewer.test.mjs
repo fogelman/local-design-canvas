@@ -374,7 +374,10 @@ test("the comment box: options only while in use, Claude's progress in the threa
 test("Send to Claude can be turned off before typing: a reply that's a note for people", { skip }, async () => {
   await page.evaluate(() => { closePop(); setTool("move"); toClaude = true; openThreadById("c2", true); });
   await composerFocused();
+  const indent = () => page.evaluate(() => parseFloat(getComputedStyle(document.querySelector("#pop textarea")).textIndent));
+  assert.ok(await indent() > 30, "the text starts after @Claude on its first line, and wraps under it");
   await page.click("#pop .ck"); // the box is still empty
+  assert.equal(await indent(), 0, "no @Claude: the text starts at the edge");
   assert.equal(await page.isChecked("#pop .ck input"), false, "unchecked");
   assert.ok(await page.isHidden("#pop .chip"), "no @Claude");
   assert.ok(await page.evaluate(() => document.activeElement?.matches("#pop textarea")), "still typing in the box");

@@ -84,6 +84,11 @@ body.hide-resolved .pin.resolved { display: none; }
 .menu hr { border: 0; border-top: 1px solid var(--pill-line); margin: 6px 4px; }
 #pageMenu { top: 50px; left: 10px; }
 #zoomMenu { top: 50px; right: 10px; }
+/* menus never run past the window: at most its height, the page list scrolls and "New page" stays at the bottom */
+.menu { max-height: calc(100vh - 60px); overflow-y: auto; }
+#pageMenu { display: flex; flex-direction: column; overflow: hidden; }
+#pageMenu > * { flex: none; }
+#pageMenu .pages { flex: 0 1 auto; min-height: 0; overflow-y: auto; overscroll-behavior: contain; }
 
 #status { position: fixed; left: 50%; bottom: 14px; transform: translateX(-50%); color: var(--mid); }
 
@@ -133,9 +138,9 @@ body.hide-resolved .pin.resolved { display: none; }
 #pop .field { display: flex; flex-direction: column; gap: 8px; padding: 10px 10px 10px 12px; border: 1px solid var(--pill-line); border-radius: 10px; background: rgba(255, 255, 255, 0.02); transition: border-color 0.12s; }
 #pop .field:focus-within, #pop .field.drop { border-color: #2f80ed; }
 #pop .field.drop { border-style: dashed; }
-#pop .line { display: flex; align-items: flex-start; gap: 5px; }
+#pop .line { position: relative; display: flex; } /* @Claude sits on the text's first line, which is indented by its width: wrapped lines use the full width */
 #pop textarea { flex: 1; min-width: 0; resize: none; background: transparent; border: 0; padding: 0; height: 19px; min-height: 19px; max-height: 140px; outline: none; font-size: 13px; line-height: 19px; }
-#pop .chip { display: none; flex: none; line-height: 19px; }
+#pop .chip { display: none; position: absolute; left: 0; top: 0; line-height: 19px; pointer-events: none; }
 #pop form.to-claude .chip { display: block; }
 #pop textarea::placeholder { color: var(--dim); }
 #pop .field:not(:focus-within):not(.has):not(.drop) .send { display: none; }
