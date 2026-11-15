@@ -94,6 +94,17 @@ function mouseInFrame(f, e) {
   mouse = { x: r.left + e.clientX * pan.k, y: r.top + e.clientY * pan.k };
 }
 
+// The canvas never scrolls: pan moves it. But a browser scrolls even an overflow-hidden box to reveal something, and
+// Firefox does it from inside a screen: a field focused as a screen (re)loads, a scrollIntoView. A scrolled view (or
+// page) draws everything shifted while pan doesn't know, so zoom drifts and comments land off their element.
+// Snap it back at once.
+const unscroll = () => {
+  if (view.scrollLeft || view.scrollTop) view.scrollTo(0, 0);
+  if (scrollX || scrollY) scrollTo(0, 0);
+};
+view.addEventListener("scroll", unscroll);
+addEventListener("scroll", unscroll);
+
 // ---------- keys ----------
 addEventListener("keydown", (e) => {
   if (!$("#modal").hidden) return; // the modal owns the keyboard

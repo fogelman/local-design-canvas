@@ -435,3 +435,11 @@ test("every zoom keeps the point under the mouse in place: wheel, keys, inside a
   await page.click("#panelBtn");
   assert.deepEqual(errors, []);
 });
+
+test("a scroll from inside a screen never shifts the canvas (Firefox scrolls the view to reveal a focused field)", { skip }, async () => {
+  await page.evaluate(() => { closePop(); setTool("move"); fitRect(frames.get("inbox.html"), 0.5); });
+  await page.waitForFunction(() => frames.get("inbox.html")?.el.classList.contains("loaded"));
+  await page.evaluate(() => { view.scrollTop = 500; view.scrollLeft = 200; }); // what Firefox does from inside a screen
+  await page.waitForFunction(() => view.scrollTop === 0 && view.scrollLeft === 0);
+  assert.deepEqual(errors, []);
+});
