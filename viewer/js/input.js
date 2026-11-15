@@ -25,6 +25,7 @@ view.addEventListener("pointerdown", (e) => {
   e.preventDefault();
 });
 view.addEventListener("pointermove", (e) => {
+  mouse = { x: e.clientX, y: e.clientY };
   if (drag) {
     const dx = e.clientX - drag.sx, dy = e.clientY - drag.sy;
     if (Math.abs(dx) + Math.abs(dy) > 2) drag.moved = true;
@@ -62,11 +63,47 @@ pinsEl.addEventListener("pointerdown", (e) => {
   e.stopPropagation();
   openThread === p.dataset.id ? closePop() : openThreadById(p.dataset.id);
 });
+// The zoom a Ctrl/⌘ + wheel step asks for. A trackpad pinch sends many small steps and follows the fingers; a mouse
+// wheel notch is one big step (100 px or 3 lines), capped so each notch zooms about 1.2× and in/out mirror each other.
+function wheelZoom(e) {
+  const dy = e.deltaMode ? e.deltaY * 20 : e.deltaY;
+  return pan.k * Math.exp(-Math.max(-20, Math.min(20, dy)) * 0.01);
+}
 view.addEventListener("wheel", (e) => {
   e.preventDefault();
-  if (e.ctrlKey || e.metaKey) zoomAt(pan.k * Math.exp(-e.deltaY * (e.deltaMode ? 0.05 : 0.01)), e.clientX, e.clientY);
+  if (e.ctrlKey || e.metaKey) zoomAt(wheelZoom(e), e.clientX, e.clientY);
   else { const m = e.deltaMode ? 20 : 1; pan.x -= (e.shiftKey && !e.deltaX ? e.deltaY : e.deltaX) * m; pan.y -= (e.shiftKey && !e.deltaX ? 0 : e.deltaY) * m; apply(); }
 }, { passive: false });
+// Ctrl/⌘ + wheel (and a trackpad pinch) anywhere else, such as the comment box, the panel or the toolbars, would
+// zoom the browser tab around its corner instead of the canvas at the pointer: zoom the canvas there too.
+addEventListener("wheel", (e) => {
+  if (!(e.ctrlKey || e.metaKey) || view.contains(e.target)) return;
+  e.preventDefault();
+  if ($("#modal").hidden && presenting < 0) zoomAt(wheelZoom(e), e.clientX, e.clientY);
+}, { passive: false });
+// the same from inside a live screen (interact mode): its point, mapped to the window
+function zoomFromFrame(f, e) {
+  if (!(e.ctrlKey || e.metaKey)) return;
+  e.preventDefault();
+  mouseInFrame(f, e);
+  zoomAt(wheelZoom(e), mouse.x, mouse.y);
+}
+// the mouse over a live screen (interact mode), in window px
+function mouseInFrame(f, e) {
+  const r = f.el.querySelector(".box").getBoundingClientRect();
+  mouse = { x: r.left + e.clientX * pan.k, y: r.top + e.clientY * pan.k };
+}
+
+// The canvas never scrolls: pan moves it. But a browser scrolls even an overflow-hidden box to reveal something, and
+// Firefox does it from inside a screen: a field focused as a screen (re)loads, a scrollIntoView. A scrolled view (or
+// page) draws everything shifted while pan doesn't know, so zoom drifts and comments land off their element.
+// Snap it back at once.
+const unscroll = () => {
+  if (view.scrollLeft || view.scrollTop) view.scrollTo(0, 0);
+  if (scrollX || scrollY) scrollTo(0, 0);
+};
+view.addEventListener("scroll", unscroll);
+addEventListener("scroll", unscroll);
 
 // ---------- keys ----------
 addEventListener("keydown", (e) => {
@@ -97,6 +134,16 @@ addEventListener("keydown", (e) => {
   }
 });
 addEventListener("keyup", (e) => { if (e.code === "Space") { spaceDown = false; document.body.classList.remove("space"); } });
+// A screen loading (live, or hidden for its picture) can take the focus by itself: an autofocus field, a script.
+// Outside interact mode the keys belong to the canvas, so the focus goes back where it was (the comment box, say).
+let lastFocus = null;
+document.addEventListener("focusin", (e) => { if (e.target.localName !== "iframe") lastFocus = e.target; });
+addEventListener("blur", () => setTimeout(() => {
+  const a = document.activeElement;
+  if (a?.localName !== "iframe" || tool === "interact" || presenting >= 0) return;
+  a.blur();
+  if (lastFocus?.isConnected) lastFocus.focus({ preventScroll: true }); else window.focus();
+}));
 addEventListener("resize", () => { placePop(); if (presenting >= 0) present(presenting); });
 
 // ---------- live reload ----------
