@@ -99,7 +99,7 @@ Add `--dir <canvas>` when you're not inside the canvas folder.
 | C | Comment on any element |
 | I | Use the live screen: click, type, scroll. Links to other screens fly you there |
 | P | Present full screen. ← → steps through screens and follows links between them |
-| Scroll · Ctrl+scroll | Pan · zoom |
+| Scroll · Ctrl+scroll (or pinch), + / − | Pan · zoom around the mouse: the point under it stays in place |
 | Shift+1 · Shift+0 · Shift+2 | Fit everything · 100% · the selected screen |
 | R | Apply waiting updates (see below) |
 

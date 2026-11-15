@@ -118,7 +118,10 @@ function apply() {
   moved();
 }
 const toWorld = (sx, sy) => ({ x: (sx - pan.x) / pan.k, y: (sy - pan.y) / pan.k });
-function zoomAt(k, sx = innerWidth / 2, sy = innerHeight / 2) {
+// Where the mouse last was over the canvas (window px). Every zoom (wheel, keys, the zoom menu) keeps the point under
+// it in place, as in Figma; before the mouse has been over the canvas, the window's center.
+let mouse = null;
+function zoomAt(k, sx = mouse?.x ?? innerWidth / 2, sy = mouse?.y ?? innerHeight / 2) {
   k = Math.min(4, Math.max(0.03, k));
   pan.x = sx - (sx - pan.x) * (k / pan.k);
   pan.y = sy - (sy - pan.y) * (k / pan.k);

@@ -391,3 +391,47 @@ test("Send to Claude can be turned off before typing: a reply that's a note for 
   await page.keyboard.press("Escape");
   assert.deepEqual(errors, []);
 });
+
+test("every zoom keeps the point under the mouse in place: wheel, keys, inside a live screen, over the panels", { skip }, async () => {
+  const at = [500, 400];
+  const world = () => page.evaluate(([x, y]) => ({ ...toWorld(x, y), k: pan.k }), at);
+  const stays = async (label, act) => {
+    await page.mouse.move(at[0] + 2, at[1]); await page.mouse.move(...at);
+    const w0 = await world();
+    await act();
+    await page.waitForFunction((k) => pan.k !== k, w0.k);
+    const w1 = await world();
+    assert.ok(Math.abs(w1.x - w0.x) < 2 && Math.abs(w1.y - w0.y) < 2, `${label}: the point under the mouse stays put: ${JSON.stringify([w0, w1])}`);
+    return w1.k;
+  };
+  const wheel = async (dy, n) => { await page.keyboard.down("Control"); for (let i = 0; i < n; i++) await page.mouse.wheel(0, dy); await page.keyboard.up("Control"); };
+  await page.evaluate(() => { closePop(); setTool("move"); fitRect(frames.get("inbox.html"), 0.5); });
+  await page.mouse.click(5, 895); // empty canvas: the page has the keyboard
+
+  const k0 = await page.evaluate(() => pan.k);
+  await stays("wheel in", () => wheel(-100, 3));
+  const back = await stays("wheel out", () => wheel(100, 3));
+  assert.ok(Math.abs(back - k0) < 1e-9, "a mouse wheel's notches in and out mirror each other");
+  await stays("+ key", () => page.keyboard.press("Equal"));
+  await stays("- key", () => page.keyboard.press("Minus"));
+
+  // a screen that takes the focus by itself doesn't take the canvas's keys
+  await page.evaluate(() => docOf(frames.get("inbox.html")).querySelector("button, input, a")?.focus());
+  await stays("- key after a screen took the focus", () => page.keyboard.press("Minus"));
+
+  // interact mode: the wheel goes to the screen's own page
+  await page.evaluate(() => setTool("interact"));
+  await stays("wheel inside a live screen", () => wheel(-100, 2));
+  await page.evaluate(() => setTool("move"));
+
+  // over the comments panel, outside the canvas: the canvas zooms, not the browser tab
+  await page.click("#panelBtn");
+  const p = await page.evaluate(() => { const r = $("#panel").getBoundingClientRect(); return [r.x + r.width / 2, r.y + r.height / 2]; });
+  await page.mouse.move(...p);
+  const w0 = await page.evaluate(([x, y]) => ({ ...toWorld(x, y), k: pan.k }), p);
+  await wheel(-100, 2);
+  const w1 = await page.evaluate(([x, y]) => ({ ...toWorld(x, y), k: pan.k }), p);
+  assert.ok(w1.k > w0.k && Math.abs(w1.x - w0.x) < 2 && Math.abs(w1.y - w0.y) < 2, `over the panel: ${JSON.stringify([w0, w1])}`);
+  await page.click("#panelBtn");
+  assert.deepEqual(errors, []);
+});

@@ -493,6 +493,16 @@ function onFrameLoad(f) {
   reveal(f, f.iframe);
   if (f.scroll) { win.scrollTo(f.scroll.x, f.scroll.y); f.scroll = null; }
   win.addEventListener("scroll", renderPins, { passive: true });
+  win.addEventListener("wheel", (e) => zoomFromFrame(f, e), { passive: false });
+  win.addEventListener("pointermove", (e) => mouseInFrame(f, e), { passive: true });
+  // A screen can take the focus by itself (an autofocus field, a script). Outside interact mode its keys belong to the
+  // canvas: hand the focus back and replay the key there, so C, +, - and Space keep working.
+  for (const type of ["keydown", "keyup"]) win.addEventListener(type, (e) => {
+    if (tool === "interact") return;
+    e.preventDefault(); e.stopImmediatePropagation();
+    f.iframe.blur(); window.focus();
+    dispatchEvent(new KeyboardEvent(type, e));
+  }, true);
   // keep the canvas shortcuts working while focus is inside a frame (interact mode)
   win.addEventListener("keydown", (e) => { if (e.key === "Escape") setTool("move"); });
   for (const ev of ["pointerdown", "keydown", "input"]) win.addEventListener(ev, () => (f.touched = true), { capture: true, passive: true });
